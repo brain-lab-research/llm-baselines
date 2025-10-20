@@ -1,11 +1,41 @@
-tiktoken
---find-links https://download.pytorch.org/whl/torch_stable.html
-torch
-torchaudio
-torchvision
-tqdm
-transformers
-wandb
-datasets
-zstandard
-numpy==1.22.4
+# Core ML/AI packages
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+transformers==4.53.2
+accelerate==1.7.0
+peft==0.16.0
+datasets==2.19.0
+
+# Data science
+numpy==1.24.4
+pandas==2.2.3
+matplotlib==3.9.3
+seaborn==0.13.2
+scikit-learn==1.5.2
+scipy==1.14.1
+
+# ML tools
+optuna==4.1.0
+wandb==0.18.7
+huggingface-hub==0.33.0
+bitsandbytes==0.46.1
+
+# Utilities
+einops==0.8.1
+nltk==3.9.1
+rouge-score==0.1.2
+sentencepiece==0.2.0
+tiktoken==0.8.0
+loguru==0.7.3
+ipdb==0.13.13
+nvitop==1.5.0
+pyspark==3.5.1
+requests==2.32.3
+pyyaml==6.0.2
+tqdm==4.65.0
+termcolor==3.1.0
+
+# Jupyter
+jupyter
+ipykernel

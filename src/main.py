@@ -21,16 +21,24 @@ from optim.ademamix import AdEMAMix
 from optim.ademamix2 import AdEMAMix2
 from optim.adopt import ADOPT
 from optim.base import train
-from optim.clipped import (AdagradClip, AdaGradClipDelayedEta, AdamClip,
-                           AdamClipDelayedEta)
+from optim.clipped import (
+    AdagradClip,
+    AdaGradClipDelayedEta,
+    AdamClip,
+    AdamClipDelayedEta,
+)
 from optim.lamb import Lamb
 from optim.lion import Lion
 from optim.mars import MARS
 from optim.muon import CombinedScheduler, Muon
 from optim.normalized import NormalizedSGD
 from optim.prodigy import Prodigy
-from optim.schedule import (cos_inf_schedule, cosine_wsd_decay_schedule,
-                            dd_schedule, wsd_schedule)
+from optim.schedule import (
+    cos_inf_schedule,
+    cosine_wsd_decay_schedule,
+    dd_schedule,
+    wsd_schedule,
+)
 from optim.schedulefree import AdamWScheduleFree, SGDScheduleFree
 from optim.sgdf import SGDF
 from optim.shampoo import DistributedShampoo
@@ -38,6 +46,7 @@ from optim.sign import Signum
 from optim.soap import SOAP
 from optim.sophia import SophiaG
 
+from optim.dykaf import DyKAF
 
 def get_args():
     parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -77,6 +86,7 @@ def main(args, parser):
     if distributed_backend.is_master_process() and args.wandb:
         wandb.init(
             project=args.wandb_project,
+            tags=[args.model, args.dataset, args.opt],
             name=exp_name,
             config=vars(args),
             entity=args.wandb_entity,
@@ -136,6 +146,24 @@ def main(args, parser):
             weight_decay=args.weight_decay,
             **extra_args,
         )
+    elif args.opt == "dykaf":
+        opt = DyKAF(
+            group_specs,
+            lr=args.lr,
+            betas=(args.beta1, args.beta2),
+            shampoo_beta=args.shampoo_beta,
+            weight_decay=args.weight_decay,
+            precondition_frequency=args.precondition_frequency,
+            max_precond_dim=args.max_precond_dim,
+            merge_dims=args.merge_dims,
+            precondition_1d=args.precondition_1d,
+            normalize_grads=args.normalize_grads,
+            data_format=args.soap_data_format,
+            correct_bias=args.correct_bias,
+            init=args.dykaf_init,
+            adam_rank_one=args.dykaf_rank_one,
+            report_fisher_diff=args.report_fisher_diff,
+        )
     elif args.opt == "soap":
         opt = SOAP(
             group_specs,
@@ -150,16 +178,17 @@ def main(args, parser):
             normalize_grads=args.normalize_grads,
             data_format=args.soap_data_format,
             correct_bias=args.correct_bias,
+            report_fisher_diff=args.report_fisher_diff,
         )
     elif args.opt == "muon":
         param_list = (
-            list(model.parameters())
+            list(p for p in model.parameters() if p.requires_grad)
             if args.distributed_backend is None
-            else list(model.module.parameters())
+            else list(p for p in model.module.parameters() if p.requires_grad)
         )
-        assert (
-            sum(p.numel() for p in param_list) == params_cnt
-        ), "number of parameters must be the same"
+        # assert (
+        #     sum(p.numel() for p in param_list) == params_cnt
+        # ), "number of parameters must be the same"
         opt = Muon(
             muon_params=param_list,
             lr=args.muon_lr_factor,
@@ -471,12 +500,12 @@ def main(args, parser):
         scheduler = None
 
     if (exp_dir / "ckpts" / "latest" / "main.pt").exists():
-        if not args.auto_resume:
-            raise ValueError(
+        if args.do_not_auto_resume:
+            print(
                 f"The experiment dir {exp_dir} already exists. "
-                + "To resume training, set auto_resume=True. "
-                + "Otherwise, specify a different experiment name. "
+                + "Overriding with existing experiment, because do_not_auto_resume==True."
             )
+            exp_dir.mkdir(parents=True, exist_ok=True)
         else:
             # Auto resume overwrites resume_from
             args.resume_from = str(exp_dir / "ckpts" / "latest")
@@ -549,6 +578,7 @@ def get_exp_name(
         "results_base_folder",
         "run_prefix",
         "wandb_run_prefix",
+        "do_not_auto_resume",
     ],
 ):
     # Get the default values

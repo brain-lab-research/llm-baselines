@@ -260,6 +260,7 @@ class GPTBase(nn.Module):
             loaded_state = torch.load(
                 str(model_path + "/ckpt.pt"),
                 map_location=torch.device(self.config.device),
+                weights_only=False,
             )
             state_to_load = loaded_state["model"]
 

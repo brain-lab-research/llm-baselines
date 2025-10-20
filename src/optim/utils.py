@@ -153,7 +153,7 @@ def load_checkpoint(model, opt, scheduler, ckpt_path, device):
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
 
-    ckpt = torch.load(ckpt_path, map_location=device)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model"])
     opt.load_state_dict(ckpt["optimizer"])
     if scheduler is not None:
@@ -177,7 +177,7 @@ def save_worker_state(ckpt_dir: Path):
 
 def load_worker_state(ckpt_dir: Path):
     rank = 0 if not dist.is_initialized() else dist.get_rank()
-    worker_state = torch.load(ckpt_dir / f"worker_{rank}.pt")
+    worker_state = torch.load(ckpt_dir / f"worker_{rank}.pt", weights_only=False)
     torch.random.set_rng_state(worker_state["rng_torch_cpu"])
     torch.cuda.set_rng_state(worker_state["rng_torch_gpu"])
     np.random.set_state(worker_state["rng_np"])
