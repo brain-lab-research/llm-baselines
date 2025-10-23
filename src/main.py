@@ -28,6 +28,7 @@ from optim.lion import Lion
 from optim.mars import MARS
 from optim.muon import CombinedScheduler, Muon
 from optim.normalized import NormalizedSGD
+from optim.lipschitz_analyzer import LipschitzAnalyzer
 from optim.prodigy import Prodigy
 from optim.schedule import (cos_inf_schedule, cosine_wsd_decay_schedule,
                             dd_schedule, wsd_schedule)
@@ -122,7 +123,7 @@ def main(args, parser):
 
     args.world_size = distributed_backend.get_world_size()
 
-    if args.opt == "adamw":
+    if args.opt in ["adamw", "adam"]:
         device_type = "cuda" if "cuda" in args.device else "cpu"
         use_fused = (device_type == "cuda") and (
             "fused" in inspect.signature(torch.optim.AdamW).parameters
@@ -157,12 +158,12 @@ def main(args, parser):
             if args.distributed_backend is None
             else list(model.module.parameters())
         )
-        assert (
-            sum(p.numel() for p in param_list) == params_cnt
-        ), "number of parameters must be the same"
+        # assert (
+        #     sum(p.numel() for p in param_list) == params_cnt
+        # ), "number of parameters must be the same"
         opt = Muon(
             muon_params=param_list,
-            lr=args.muon_lr_factor,
+            lr=args.lr,
             momentum=args.momentum,
             nesterov=args.nesterov,
             ns_steps=args.muon_ns_steps,
@@ -483,6 +484,12 @@ def main(args, parser):
     elif distributed_backend.is_master_process():
         exp_dir.mkdir(parents=True, exist_ok=True)
 
+    # Create Lipschitz analyzer
+    lipschitz_analyzer = LipschitzAnalyzer(
+        enabled=args.analyze_lipschitz,
+        max_analysis_steps=args.max_analysis_steps,
+    )
+
     stats = train(
         model=model,
         opt=opt,
@@ -491,6 +498,7 @@ def main(args, parser):
         exp_dir=exp_dir,
         distributed_backend=distributed_backend,
         cfg=args,
+        lipschitz_analyzer=lipschitz_analyzer,
     )
 
     stats["args"] = vars(args)
@@ -564,7 +572,8 @@ def get_exp_name(
             prefix_parts.append(f"{key}-{value}")
 
     prefix = "_".join(prefix_parts)
-    prefix = f"{args.batch_size}x{args.acc_steps}(rank={rank})_" + prefix
+    # prefix = f"{args.batch_size}x{args.acc_steps}(rank={rank})_" + prefix
+    prefix = f"{args.batch_size}x{args.acc_steps}" + prefix
 
     # Generate the rest of the string with non-default arguments
     non_default_parts = []

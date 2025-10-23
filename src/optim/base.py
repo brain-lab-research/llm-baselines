@@ -21,6 +21,7 @@ def train(
     exp_dir,
     distributed_backend,
     cfg,
+    lipschitz_analyzer=None,
 ):
     not_compiled_model = model
     if cfg.compile:
@@ -151,6 +152,12 @@ def train(
         )
         if cfg.scheduler != "none":
             scheduler.step()
+
+        # Update Lipschitz analyzer if enabled (must be after opt.step but before zero_grad)
+        if lipschitz_analyzer and lipschitz_analyzer.is_enabled():
+            train_loss = loss.detach().cpu().item() * cfg.acc_steps
+            lipschitz_analyzer.update(model, train_loss, curr_iter, cfg.opt)
+
         if cfg.opt == "sophiag":
             opt.zero_grad(set_to_none=True)
             if curr_iter % cfg.precondition_frequency == cfg.precondition_frequency - 1:
@@ -174,6 +181,7 @@ def train(
         else:
             opt.zero_grad(set_to_none=True)
         # opt.zero_grad(set_to_none=True)
+
         dt = (time.perf_counter_ns() - t_start) / 1e9
 
         curr_iter += 1
@@ -210,6 +218,10 @@ def train(
                 )
 
             grad_norms = []
+
+    # Finalize Lipschitz analysis if enabled
+    if lipschitz_analyzer:
+        lipschitz_analyzer.finalize_analysis()
 
     return stats
 

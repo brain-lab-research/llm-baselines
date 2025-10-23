@@ -1,10 +1,10 @@
 # LLM-baselines
 
-A modular codebase to experiment with transformers, inspired by nanoGPT. 
+A modular codebase to experiment with transformers, inspired by nanoGPT.
 
-## Quickstart 
+## Quickstart
 
-Install dependencies: 
+Install dependencies:
 
 ```
 pip install -r requirements.txt
@@ -25,7 +25,6 @@ This training takes roughly ~3h on a single A100 (80GB) GPU. The plot of the tra
 
 You can check out the wandb run for yourself [here](https://wandb.ai/haeggee/llm-lauzhack/runs/lm2obqy9?nw=nwuserhaeggee).
 
-
 ## Less quick start
 
 Here are the possible parameters you can use (copypasted from `config/base.py`):
@@ -44,7 +43,7 @@ parser.add_argument('--iterations', default=25000, type=int) # total number of t
 parser.add_argument('--warmup_steps', default=300, type=int)
 parser.add_argument('--lr', default=1e-3, type=float)
 parser.add_argument('--wsd_final_lr_scale', default=0.0, type=float) # wsd scheduler
-parser.add_argument('--wsd_fract_decay', default=0.1, type=float) # wsd scheduler 
+parser.add_argument('--wsd_fract_decay', default=0.1, type=float) # wsd scheduler
 parser.add_argument('--decay_type', default='linear', choices=['linear', 'cosine', 'exp', 'miror_cosine', 'square', 'sqrt'])
 parser.add_argument('--dd_second_decay_type', default='linear', choices=['linear', 'cosine', 'exp', 'miror_cosine', 'square', 'sqrt'])
 parser.add_argument('--dd_first_lr_factor', default=1e-2, type=float)
@@ -66,7 +65,7 @@ parser.add_argument('--precondition_1d', default=False, type=bool)
 parser.add_argument('--normalize_grads', default=False, type=bool)
 parser.add_argument('--soap_data_format', default='channels_first', type=str)
 parser.add_argument('--correct_bias', default=True, type=bool)
-parser.add_argument('--nesterov', default=False, type=bool) # whether to use Nesterov-style momentum 
+parser.add_argument('--nesterov', default=False, type=bool) # whether to use Nesterov-style momentum
 parser.add_argument('--muon_ns_steps', default=5, type=int) # the number of steps to use in the newton schulz, if it is iterative
 parser.add_argument('--muon_lr_factor', default=0.02, type=float) # a factor by which to reduce the lr for muon
 parser.add_argmunet('--adema_beta3', default=0.9, type=float) # beta3 in AdEMAMix
@@ -99,7 +98,7 @@ parser.add_argument('--lamb_use_bias_correction', default=False, type=bool)
 parser.add_argument('--dataset', default='slimpajama', choices=['slimpajama', 'wikitext', 'shakespeare-char', 'arxiv', 'arxiv2000', 'arxiv+wiki', 'openwebtext2', 'redpajama', 'redpajamav2', 'slimpajama_chunk1', 'fineweb', 'finewebedu'])
 parser.add_argument('--tokenizer', default='gpt2', type=str, choices=['gpt2', 'mistral'])
 parser.add_argument('--vocab_size', default=50304, type=int)
-parser.add_argument('--data_in_ram', action='store_true') # force the data to RAM, you most likely do not need this  
+parser.add_argument('--data_in_ram', action='store_true') # force the data to RAM, you most likely do not need this
 # Model params
 parser.add_argument('--model', default='base', choices=['base', 'llama', 'test'])
 parser.add_argument('--parallel_block', action='store_true')
@@ -109,11 +108,11 @@ parser.add_argument('--init_std', default=0.02, type=float)
 parser.add_argument('--dropout', default=0.0, type=float) # keep to 0 unless in low data regime (e.g. wikitext)
 parser.add_argument('--n_head', default=12, type=int)
 parser.add_argument('--n_layer', default=12, type=int) # depth in (att + ff) blocks
-parser.add_argument('--n_embd', default=768, type=int) # hidden size ... 
+parser.add_argument('--n_embd', default=768, type=int) # hidden size ...
 parser.add_argument('--sequence_length', default=512, type=int)
 parser.add_argument('--dtype', default='bfloat16', type=str, choices=['float32', 'float16', 'bfloat16'],)
 parser.add_argument('--bias', default=False, type=bool)
-parser.add_argument('--compile', action='store_true') # if true then model is compiled 
+parser.add_argument('--compile', action='store_true') # if true then model is compiled
 parser.add_argument('--rmsnorm_eps', default=1e-5, type=float) # used by the llama model
 parser.add_argument('--multiple_of', default=256, type=int) # used by the llama model make SwiGLU hidden layer size multiple of large power of 2
 parser.add_argument('--n_kv_head', default=None, type=int) # for Adam-mini
@@ -147,9 +146,9 @@ export WANDB_API_KEY="put your authorize key here, to find it: https://wandb.ai/
 python ./src/main.py --config_format base --wandb --wandb_project "my awesome project" --n_layer 7 --model base --seed 123
 ```
 
-## How to add your own transformer architecture? 
+## How to add your own transformer architecture?
 
-The structure of the project is the following: 
+The structure of the project is the following:
 
 ```sh
 src/
@@ -176,9 +175,9 @@ src/
         # code to enable simple distributed training
 ```
 
-Given the above structure, to add your own model, you can just fork the `./src/models/base.py` file, do your modifications, then if necessary fork the `./src/optim/base.py` in case you need some custom training loop or evaluation. You also need to fork the `./src/config/base.py` file to add your own parameters, which imply adding your new config to the mapping `CONFIG_FORMAT_TO_MODULE_MAP` in `./src/config/__init__.py`. To add a new dataset, create a new file in the `data` folder, check `wikitext.py` for the expected format. 
+Given the above structure, to add your own model, you can just fork the `./src/models/base.py` file, do your modifications, then if necessary fork the `./src/optim/base.py` in case you need some custom training loop or evaluation. You also need to fork the `./src/config/base.py` file to add your own parameters, which imply adding your new config to the mapping `CONFIG_FORMAT_TO_MODULE_MAP` in `./src/config/__init__.py`. To add a new dataset, create a new file in the `data` folder, check `wikitext.py` for the expected format.
 
-**Note:** we use [black](https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html) and [isort](https://pycqa.github.io/isort/) for all pull requests. Before committing your code, simply run ```black . && isort .``` and you will be fine.
+**Note:** we use [black](https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html) and [isort](https://pycqa.github.io/isort/) for all pull requests. Before committing your code, simply run `black . && isort .` and you will be fine.
 
 ## Multi-GPU training
 
@@ -188,12 +187,60 @@ Given a multi-GPU machine with e.g. 4 GPUs, one can distribute the training usin
 torchrun --nproc_per_node=4 ./src/main.py --config_format base --distributed_backend nccl --dataset slimpajama --model base
 ```
 
-When using multiple GPUs, the data will be distributed among the GPUs by dividing the number of accumulation steps by the number of nodes. For instance if we train with a batch size of 32 and 4 accumulation steps, then each GPU will process batches of 32 elements and do 1 accumulation steps. For this reason we require `acc_steps` to be a multiple of the number of GPUs.    
-
+When using multiple GPUs, the data will be distributed among the GPUs by dividing the number of accumulation steps by the number of nodes. For instance if we train with a batch size of 32 and 4 accumulation steps, then each GPU will process batches of 32 elements and do 1 accumulation steps. For this reason we require `acc_steps` to be a multiple of the number of GPUs.
 
 ## Experimenting locally on your device with CPU
+
 If do not have access to a GPU or just want to try the code locally on your device, you can try the Shakespeare dataset with character-level tokens:
 
 ```sh
 python ./src/main.py --n_layer=2 --n_head=4 --n_embd=128 --sequence_length=256 --dataset=shakespeare-char --device=cpu --vocab_size=96
 ```
+
+## Lipschitz Analysis for Gradient Smoothness
+
+This repository includes functionality to analyze the Lipschitz smoothness assumption for gradients during training. The analysis checks the following mathematical relationship:
+
+```
+| ∇ loss(x) - ∇ loss(y) |_* ≤ (K_0 + K_ρ * (loss(x) - loss(x*))^ρ) * | x - y |
+```
+
+Where:
+
+- `x` and `y` are current and previous model weights
+- `| |_*` and `| |` are dual norms (currently using Frobenius norm)
+- `loss(x*)` is the optimal loss value (assumed to be 0)
+- `K_0`, `ρ`, `K_ρ` are parameters fitted from training data
+
+### Usage
+
+Enable Lipschitz analysis by adding the `--analyze_lipschitz` flag:
+
+```sh
+python ./src/main.py --opt sgd --lr 0.001 --analyze_lipschitz --wandb
+```
+
+### Quick Example
+
+Run a complete example with:
+
+```sh
+python example_lipschitz.py
+```
+
+Or use the provided script:
+
+```sh
+./scripts/train-with-lipschitz.sh
+```
+
+### Output
+
+The analysis provides:
+
+- Real-time logging of gradient/weight norms and ratios to W&B
+- Fitted parameters `K_0`, `ρ`, `K_ρ` at the end of training
+- Visualization plots showing the relationship between loss and Lipschitz ratios
+- Console output with parameter values and goodness of fit
+
+For detailed documentation, see [LIPSCHITZ_ANALYSIS.md](LIPSCHITZ_ANALYSIS.md).
