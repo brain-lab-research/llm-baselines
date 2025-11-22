@@ -34,6 +34,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--latest_ckpt_interval", default=0, type=int)
     parser.add_argument("--resume_from", default=None, type=str)
     parser.add_argument("--resume_from_swa", default=None, type=str)
+    parser.add_argument("--do_not_auto_resume", action="store_true")
 
     parser.add_argument("--auto_resume", default=True)
 
@@ -59,6 +60,8 @@ def parse_args(base_parser, args, namespace):
         choices=["linear", "cos", "wsd", "none", "cos_inf", "cos_wsd", "dd"],
     )
     parser.add_argument("--cos_inf_steps", default=0, type=int)
+    parser.add_argument("--div_factor", default=1e2, type=float)
+    parser.add_argument("--final_div_factor", default=1, type=float)
     # parser.add_argument("--cos-final-lr", default=1e-6, type=float)
     parser.add_argument("--iterations", default=15000, type=int)
     parser.add_argument("--warmup_steps", default=3000, type=int)
@@ -213,7 +216,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--dropout", default=0.0, type=float)
     parser.add_argument("--n_head", default=12, type=int)
     parser.add_argument("--n_layer", default=24, type=int)  # depths in att + ff blocks
-    parser.add_argument("--sequence_length", default=512, type=int)
+    parser.add_argument("--sequence_length", default=128, type=int)
     parser.add_argument(
         "--n_embd", default=768, type=int  # embedding size / hidden size ...
     )
@@ -241,7 +244,22 @@ def parse_args(base_parser, args, namespace):
         help="Enable Lipschitz constant analysis for gradient"
     )
     parser.add_argument(
-        "--max_analysis_steps", default=1000, type=int, help="Maximum number of steps for Lipschitz plot"
+        "--max_analysis_steps", default=None, type=int, help="Maximum number of steps for Lipschitz plot"
+    )
+    parser.add_argument(
+        "--min_analysis_steps", default=None, type=int, help="Minimum number of steps for Lipschitz plot"
+    )
+    parser.add_argument(
+        "--weight_norm_type", default="frobenius", type=str, choices=["frobenius"]
+    )
+    parser.add_argument(
+        "--rho", default=2, type=float, help="rho parameter for Lipschitz analysis"
+    )
+    parser.add_argument(
+        "--fit_rho", action="store_true", help="Fit rho parameter for Lipschitz analysis"
+    )
+    parser.add_argument(
+        "--f_star", default=0, type=float, help="f_star parameter for Lipschitz analysis"
     )
 
     return parser.parse_args(args, namespace)

@@ -154,7 +154,7 @@ def train(
             scheduler.step()
 
         # Update Lipschitz analyzer if enabled (must be after opt.step but before zero_grad)
-        if lipschitz_analyzer and lipschitz_analyzer.is_enabled():
+        if lipschitz_analyzer and lipschitz_analyzer.enabled:
             train_loss = loss.detach().cpu().item() * cfg.acc_steps
             lipschitz_analyzer.update(model, train_loss, curr_iter, cfg.opt)
 

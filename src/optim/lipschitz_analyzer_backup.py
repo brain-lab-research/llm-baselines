@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 from typing import Dict, Optional
 import io
 import base64
-import tqdm
 
 
 class LipschitzAnalyzer:
@@ -29,8 +28,7 @@ class LipschitzAnalyzer:
         min_analysis_steps: int = None,
         weight_norm_type: str = 'frobenius',
         rho: float = 2,
-        f_star: float = 1.5,
-        fit_rho: bool = True
+        f_star: float = 1.5
     ):
         self.enabled = enabled
         if not enabled:
@@ -43,7 +41,6 @@ class LipschitzAnalyzer:
         self.min_analysis_steps = min_analysis_steps
         self.rho = rho
         self.f_star = f_star
-        self.fit_rho = fit_rho
         if weight_norm_type == "frobenius":
             self.weight_norm_type = "fro"
             self.grad_norm_type = "fro"
@@ -131,29 +128,25 @@ class LipschitzAnalyzer:
     def _fit_least_squares(
         self, grad_diff_norms: np.ndarray,
         loss_vals: np.ndarray,
-        weight_diff_norms: np.ndarray,
-        rho: float
-    ) -> Optional[Dict[str, float]]:
+        weight_diff_norms: np.ndarray
+    ) -> Dict[str, float]:
         """
         Fit K_0, K_1, K_ρ using least squares for the linear relationship:
         ratio = K_0 + K_1 * loss + K_ρ * loss^ρ
         where ratio = |∇loss(x) - ∇loss(y)|_* / |x - y|
         """
+        # Compute Lipschitz ratios
+        ratios = grad_diff_norms / weight_diff_norms
+
+        # Create design matrix for linear regression: [1, loss, loss^rho]
+        loss_rho = loss_vals ** self.rho
+        X = np.column_stack([np.ones(len(loss_vals)), loss_vals, loss_rho])
+        y = ratios
+
+        # Solve least squares: X * [K_0, K_1, K_ρ]ᵀ = y
         try:
-            # Compute Lipschitz ratios
-            ratios = grad_diff_norms / weight_diff_norms
-
-            # Create design matrix for linear regression: [1, loss, loss^rho]
-            loss_rho = loss_vals ** rho
-            # X = np.column_stack([np.ones(len(loss_vals)), loss_vals, loss_rho])
-            X = np.column_stack([np.ones(len(loss_vals)), loss_rho])
-            y = ratios
-
-            # Solve least squares: X * [K_0, K_1, K_ρ]ᵀ = y
             params, residuals, rank, s = np.linalg.lstsq(X, y, rcond=None)
-            # K_0, K_1, K_rho = params
-            K_0, K_rho = params
-            K_1 = 0
+            K_0, K_1, K_rho = params
 
             # Calculate R-squared for goodness of fit
             y_pred = K_0 + K_1 * loss_vals + K_rho * loss_rho
@@ -164,17 +157,18 @@ class LipschitzAnalyzer:
             return {
                 'K_0': float(K_0),
                 'K_1': float(K_1),
-                'rho': float(rho),
+                'rho': self.rho,
                 'K_rho': float(K_rho),
                 'r_squared': float(r_squared),
                 'num_data_points': len(ratios)
             }
-        except (np.linalg.LinAlgError, ValueError, OverflowError):
+        except np.linalg.LinAlgError:
+            print("Linear algebra error occurred while fitting parameters K_0, K_1 and K_rho!")
             return None
 
     def fit_parameters(self) -> Optional[Dict[str, float]]:
         """
-        Fit K_0, K_1, K_ρ parameters using least squares
+        Fit K_0, K_1, K_ρ parameters using least squares with fixed ρ = 2
 
         Returns:
             Dictionary with fitted parameters or None if insufficient data
@@ -193,39 +187,8 @@ class LipschitzAnalyzer:
         if len(grad_diff_norms) < 5:
             return None
 
-        if not self.fit_rho:
-            # Use fixed rho
-            return self._fit_least_squares(grad_diff_norms, loss_vals, weight_diff_norms, self.rho)
-
-        # Grid search for optimal rho in range (1, 4] with smart sampling around rho_0 = 2
-
-        # Smart sampling: denser around rho=2, sparser at extremes
-        rho_candidates = []
-
-        # Dense sampling around rho = 2
-        rho_candidates.extend(np.linspace(1.05, 50, 100))
-
-        # # Medium sampling
-        # rho_candidates.extend(np.linspace(1.2, 1.6, 9))   # medium density
-        # rho_candidates.extend(np.linspace(2.4, 3.0, 13))  # medium density
-
-        # # Sparse sampling at extremes
-        # rho_candidates.extend(np.linspace(1.05, 1.15, 6))  # at lower end
-        # rho_candidates.extend(np.linspace(3.1, 4.0, 10))   # at upper end
-
-        # # Remove duplicates and ensure all are > 1
-        # rho_candidates = sorted([rho for rho in set(rho_candidates) if rho > 1.0])
-
-        best_params = None
-        best_r_squared = -1
-
-        for rho in tqdm.tqdm(rho_candidates, desc="Fitting rho"):
-            params = self._fit_least_squares(grad_diff_norms, loss_vals, weight_diff_norms, rho)
-            if params and params['r_squared'] > best_r_squared:
-                best_r_squared = params['r_squared']
-                best_params = params
-
-        return best_params
+        # Use least squares fitting
+        return self._fit_least_squares(grad_diff_norms, loss_vals, weight_diff_norms)
 
     def plot_results(self, fitted_params: Dict[str, float]) -> Optional[str]:
         """
@@ -266,29 +229,23 @@ class LipschitzAnalyzer:
             # Plot fitted line
             if fitted_params:
                 K_0, K_1, K_rho = fitted_params['K_0'], fitted_params['K_1'], fitted_params['K_rho']
-                rho = fitted_params['rho']
                 r_squared = fitted_params.get('r_squared', 0)
                 loss_range = np.linspace(loss_vals.min(), loss_vals.max(), 100)
-                fitted_line = K_0 + K_1 * loss_range + K_rho * loss_range**rho  # K_0 + K_1 * loss + K_ρ * loss^ρ
+                fitted_line = K_0 + K_1 * loss_range + K_rho * loss_range**self.rho  # K_0 + K_1 * loss + K_ρ * loss^ρ
 
-                fit_status = "fitted" if self.fit_rho else "fixed"
                 ax.plot(loss_range, fitted_line, 'r-', linewidth=3,
-                        label=f'Fitted line: K_0 + K_1·loss + K_ρ·loss^{rho:.2f}\nK_0={K_0:.2f}, K_1={K_1:.2f}, K_ρ={K_rho:.2f}\nρ={rho:.2f} ({fit_status}), R²={r_squared:.3f}')
+                        label=f'Fitted line: K_0 + K_1·loss + K_ρ·loss^{self.rho}\nK_0={K_0:.2e}, K_1={K_1:.2e}, K_ρ={K_rho:.2e}\nR²={r_squared:.3f}')
 
                 # Add some visual validation
-                fitted_vals = K_0 + K_1 * loss_vals + K_rho * loss_vals**rho
+                fitted_vals = K_0 + K_1 * loss_vals + K_rho * loss_vals**self.rho
                 violations = np.sum(ratios > fitted_vals)
                 total_points = len(ratios)
                 violation_pct = 100 * violations / total_points
                 ax.text(0.02, 0.98, f'Points above line: {violations}/{total_points} ({violation_pct:.1f}%)',
                        transform=ax.transAxes, verticalalignment='top',
                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-                threshold = (K_0 / (K_rho * (rho - 1)))**rho
-                ax.text(0.02, 0.07, f'Estimated threshold: {threshold:.4f}',
-                       transform=ax.transAxes, verticalalignment='top',
-                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
-            ax.legend(fontsize=11, loc='upper right')
+            ax.legend(fontsize=11)
 
             plt.tight_layout()
 
@@ -336,11 +293,10 @@ class LipschitzAnalyzer:
         fitted_params = self.fit_parameters()
 
         if fitted_params:
-            fit_status = "fitted" if self.fit_rho else "fixed"
-            print(f"Fitted parameters (ρ = {fitted_params['rho']:.3f} {fit_status}):")
+            print("Fitted parameters (with fixed ρ = 2):")
             print(f"  K_0 = {fitted_params['K_0']:.6e}")
             print(f"  K_1 = {fitted_params['K_1']:.6e}")
-            print(f"  ρ = {fitted_params['rho']:.3f} ({fit_status})")
+            print(f"  ρ = {fitted_params['rho']:.1f} (fixed)")
             print(f"  K_ρ = {fitted_params['K_rho']:.6e}")
             print(f"  R² = {fitted_params.get('r_squared', 0):.6f}")
 
@@ -350,7 +306,7 @@ class LipschitzAnalyzer:
             losses = [dp['loss_val'] for dp in self.data_points]
 
             ratios = np.array(grad_norms) / np.array(weight_norms)
-            fitted_vals = fitted_params['K_0'] + fitted_params['K_1'] * np.array(losses) + fitted_params['K_rho'] * np.array(losses)**fitted_params['rho']
+            fitted_vals = fitted_params['K_0'] + fitted_params['K_1'] * np.array(losses) + fitted_params['K_rho'] * np.array(losses)**self.rho
             violations = np.sum(ratios > fitted_vals)
             print(f"  Validation: {violations}/{len(ratios)} points above bound ({100*violations/len(ratios):.1f}%)")
 
@@ -360,8 +316,7 @@ class LipschitzAnalyzer:
                     'lipschitz/final_K_0': fitted_params['K_0'],
                     'lipschitz/final_K_1': fitted_params['K_1'],
                     'lipschitz/final_rho': fitted_params['rho'],
-                    'lipschitz/final_K_rho': fitted_params['K_rho'],
-                    'lipschitz/final_r_squared': fitted_params['r_squared']
+                    'lipschitz/final_K_rho': fitted_params['K_rho']
                 })
 
                 # Create and log plot

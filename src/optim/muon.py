@@ -1,5 +1,5 @@
 """
-Here is an original implementation of Muon. 
+Here is an original implementation of Muon.
 Source: https://github.com/KellerJordan/modded-nanogpt
 """
 
@@ -321,8 +321,8 @@ class CombinedScheduler:
                             pct_start=cfg.warmup_steps / cfg.iterations,
                             anneal_strategy=cfg.scheduler,
                             cycle_momentum=False,
-                            div_factor=1e2,
-                            final_div_factor=1,
+                            div_factor=cfg.div_factor,
+                            final_div_factor=cfg.final_div_factor,
                         )
                     else:
                         scheduler = scheduler_cls(

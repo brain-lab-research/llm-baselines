@@ -158,9 +158,6 @@ def main(args, parser):
             if args.distributed_backend is None
             else list(model.module.parameters())
         )
-        # assert (
-        #     sum(p.numel() for p in param_list) == params_cnt
-        # ), "number of parameters must be the same"
         opt = Muon(
             muon_params=param_list,
             lr=args.lr,
@@ -405,12 +402,11 @@ def main(args, parser):
                         group.get("lr", args.lr) for group in group_specs
                     ],  # it was args.lr
                     total_steps=args.iterations,
-                    pct_start=args.warmup_steps
-                    / args.iterations,  # it was args.warmup_percent
+                    pct_start=args.warmup_steps / args.iterations,  # it was args.warmup_percent
                     anneal_strategy=args.scheduler,
                     cycle_momentum=False,
-                    div_factor=1e2,
-                    final_div_factor=1,
+                    div_factor=args.div_factor,
+                    final_div_factor=args.final_div_factor,
                 )
                 if args.opt != "muon"
                 else CombinedScheduler(opt, args)
@@ -471,7 +467,7 @@ def main(args, parser):
     else:
         scheduler = None
 
-    if (exp_dir / "ckpts" / "latest" / "main.pt").exists():
+    if (exp_dir / "ckpts" / "latest" / "main.pt").exists() and not args.do_not_auto_resume:
         if not args.auto_resume:
             raise ValueError(
                 f"The experiment dir {exp_dir} already exists. "
@@ -487,7 +483,12 @@ def main(args, parser):
     # Create Lipschitz analyzer
     lipschitz_analyzer = LipschitzAnalyzer(
         enabled=args.analyze_lipschitz,
-        max_analysis_steps=args.max_analysis_steps,
+        max_analysis_steps=args.max_analysis_steps if args.max_analysis_steps is not None else args.iterations,
+        min_analysis_steps=args.min_analysis_steps if args.min_analysis_steps is not None else 0,
+        weight_norm_type=args.weight_norm_type,
+        fit_rho=args.fit_rho,
+        rho=args.rho,
+        f_star=args.f_star
     )
 
     stats = train(
@@ -557,6 +558,9 @@ def get_exp_name(
         "results_base_folder",
         "run_prefix",
         "wandb_run_prefix",
+        "do_not_auto_resume",
+        "log_interval",
+        "analyze_lipschitz",
     ],
 ):
     # Get the default values
@@ -572,8 +576,8 @@ def get_exp_name(
             prefix_parts.append(f"{key}-{value}")
 
     prefix = "_".join(prefix_parts)
-    # prefix = f"{args.batch_size}x{args.acc_steps}(rank={rank})_" + prefix
-    prefix = f"{args.batch_size}x{args.acc_steps}" + prefix
+    prefix = f"{args.batch_size}x{args.acc_steps}(rank={rank})_" + prefix
+    # prefix = f"{args.batch_size}x{args.acc_steps}" + prefix
 
     # Generate the rest of the string with non-default arguments
     non_default_parts = []
