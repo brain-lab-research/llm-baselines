@@ -57,7 +57,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument(
         "--scheduler",
         default="cos",
-        choices=["linear", "cos", "wsd", "none", "cos_inf", "cos_wsd", "dd"],
+        choices=["linear", "cos", "wsd", "none", "cos_inf", "cos_wsd", "dd", "lipschitz"],
     )
     parser.add_argument("--cos_inf_steps", default=0, type=int)
     parser.add_argument("--div_factor", default=1e2, type=float)
@@ -81,6 +81,14 @@ def parse_args(base_parser, args, namespace):
         choices=["linear", "cosine", "exp", "miror_cosine", "square", "sqrt"],
     )
     parser.add_argument("--dd_first_lr_factor", default=1e-2, type=float)
+    # Lipschitz scheduler
+    parser.add_argument("--lipschitz_K_0", default=1.0, type=float)
+    parser.add_argument("--lipschitz_K_1", default=0.1, type=float)
+    parser.add_argument("--lipschitz_K_rho", default=0.01, type=float)
+    parser.add_argument("--lipschitz_rho", default=2.0, type=float)
+    parser.add_argument("--lipschitz_loss_star", default=0.0, type=float)
+    parser.add_argument("--lipschitz_min_lr", default=1e-6, type=float)
+    parser.add_argument("--lipschitz_max_lr", default=1.0, type=float)
 
     # Optimization
     parser.add_argument(

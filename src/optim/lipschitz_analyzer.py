@@ -145,15 +145,14 @@ class LipschitzAnalyzer:
 
             # Create design matrix for linear regression: [1, loss, loss^rho]
             loss_rho = loss_vals ** rho
-            # X = np.column_stack([np.ones(len(loss_vals)), loss_vals, loss_rho])
-            X = np.column_stack([np.ones(len(loss_vals)), loss_rho])
+            X = np.column_stack([np.ones(len(loss_vals)), loss_vals, loss_rho])
+            # X = np.column_stack([np.ones(len(loss_vals)), loss_rho])
             y = ratios
 
             # Solve least squares: X * [K_0, K_1, K_ρ]ᵀ = y
             params, residuals, rank, s = np.linalg.lstsq(X, y, rcond=None)
-            # K_0, K_1, K_rho = params
-            K_0, K_rho = params
-            K_1 = 0
+            K_0, K_1, K_rho = params
+            # K_0, K_rho = params
 
             # Calculate R-squared for goodness of fit
             y_pred = K_0 + K_1 * loss_vals + K_rho * loss_rho
@@ -243,7 +242,7 @@ class LipschitzAnalyzer:
 
             # Extract data
             grad_diff_norms = np.array([dp['grad_diff_norm'] for dp in self.data_points])
-            loss_vals = np.array([dp['loss_val'] for dp in self.data_points])  # loss(x) - loss(x*) = loss(x) since loss(x*) = 0
+            loss_vals = np.array([dp['loss_val'] for dp in self.data_points])  # loss(x) - loss(x*)
             weight_diff_norms = np.array([dp['weight_diff_norm'] for dp in self.data_points])
             iterations = np.array([dp['iteration'] for dp in self.data_points])
 
@@ -258,7 +257,7 @@ class LipschitzAnalyzer:
             cbar = plt.colorbar(scatter, ax=ax)
             cbar.set_label('Training Iteration', fontsize=10)
 
-            ax.set_xlabel('loss(x) - loss(x*)', fontsize=12)
+            ax.set_xlabel(f'loss(x) - loss(x*) = loss(x) - {self.f_star}', fontsize=12)
             ax.set_ylabel('||∇loss(x) - ∇loss(y)||_* / ||x - y||', fontsize=12)
             ax.set_title('Lipschitz Analysis: Data vs Fitted Line', fontsize=14)
             ax.grid(True, alpha=0.3)

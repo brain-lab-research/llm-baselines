@@ -151,7 +151,11 @@ def train(
             else opt.step(bs=cfg.sophia_bs * cfg.sequence_length)
         )
         if cfg.scheduler != "none":
-            scheduler.step()
+            # Pass loss to scheduler for Lipschitz scheduler
+            if cfg.scheduler == "lipschitz":
+                scheduler.step(loss=loss.detach().item())
+            else:
+                scheduler.step()
 
         # Update Lipschitz analyzer if enabled (must be after opt.step but before zero_grad)
         if lipschitz_analyzer and lipschitz_analyzer.enabled:
@@ -202,25 +206,31 @@ def train(
             )
 
             if cfg.wandb:
-                wandb.log(
-                    {
-                        "tokens": tokens,
-                        "iter": curr_iter,
-                        "train/loss": train_loss,
-                        "train/perplexity": 2.71828**train_loss,
-                        "lr": current_lrs[0],
-                        "iter_dt": dt,
-                        "max_grad_norm": max(grad_norms).item() if grad_norms else 0,
-                        "mean_grad_norm": (
-                            torch.tensor(grad_norms).mean().item() if grad_norms else 0
-                        ),
-                    }
-                )
+                log_dict = {
+                    "tokens": tokens,
+                    "iter": curr_iter,
+                    "train/loss": train_loss,
+                    "train/perplexity": 2.71828**train_loss,
+                    "lr": current_lrs[0],
+                    "iter_dt": dt,
+                    "max_grad_norm": max(grad_norms).item() if grad_norms else 0,
+                    "mean_grad_norm": (
+                        torch.tensor(grad_norms).mean().item() if grad_norms else 0
+                    ),
+                }
+
+                # Add Lipschitz scheduler parameters if using lipschitz scheduler
+                if cfg.scheduler == "lipschitz" and scheduler is not None:
+                    if scheduler.current_loss is not None:
+                        delta_t = max(scheduler.current_loss - scheduler.loss_star, scheduler.epsilon)
+                        log_dict["lipschitz_scheduler/delta_t"] = delta_t
+
+                wandb.log(log_dict)
 
             grad_norms = []
 
     # Finalize Lipschitz analysis if enabled
-    if lipschitz_analyzer:
+    if lipschitz_analyzer and lipschitz_analyzer.enabled:
         lipschitz_analyzer.finalize_analysis()
 
     return stats

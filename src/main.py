@@ -29,6 +29,7 @@ from optim.mars import MARS
 from optim.muon import CombinedScheduler, Muon
 from optim.normalized import NormalizedSGD
 from optim.lipschitz_analyzer import LipschitzAnalyzer
+from optim.lipschitz_scheduler import LipschitzScheduler
 from optim.prodigy import Prodigy
 from optim.schedule import (cos_inf_schedule, cosine_wsd_decay_schedule,
                             dd_schedule, wsd_schedule)
@@ -462,6 +463,19 @@ def main(args, parser):
                 second_decay_type=args.dd_second_decay_type,
             )
             scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda_schedule)
+        elif args.scheduler == "lipschitz":
+            scheduler = LipschitzScheduler(
+                optimizer=opt,
+                K_0=args.lipschitz_K_0,
+                K_1=args.lipschitz_K_1,
+                K_rho=args.lipschitz_K_rho,
+                rho=args.lipschitz_rho,
+                loss_star=args.lipschitz_loss_star,
+                min_lr=args.lipschitz_min_lr,
+                max_lr=args.lipschitz_max_lr,
+                warmup_steps=args.warmup_steps,
+                warmup_start_lr=args.lr / args.div_factor,
+            )
         else:
             raise NotImplementedError(f"Unknown scheduler type: {args.scheduler}.")
     else:
