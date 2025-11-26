@@ -1,16 +1,18 @@
 #!/bin/bash
 
-export CUDA_VISIBLE_DEVICES=1
-python ./src/main.py \
+export CUDA_VISIBLE_DEVICES=1,3
+
+torchrun --nproc_per_node=2 --master_port=1234 ./src/main.py \
+    --distributed_backend nccl \
     --model llama \
     --dataset fineweb \
     --optimizer muon \
-    --lr 1e-7 \
-    --iterations 10000 \
+    --lr 1e-6 \
+    --iterations 5000 \
     --n_embd 768 \
     --n_head 12 \
     --n_layer 12 \
-    --batch_size 32 \
+    --batch_size 100 \
     --sequence_length 1024 \
     --acc_steps 1 \
     --warmup_steps 500 \
@@ -25,11 +27,10 @@ python ./src/main.py \
     --dropout 0.0 \
     --eval_interval 115 --latest_ckpt_interval 1000 \
     --analyze_lipschitz \
-    --fit_rho \
     --min_analysis_steps 100 \
     --weight_norm_type frobenius \
     --rho 2 \
-    --f_star 0 \
+    --f_star 5 \
     --log_interval 1 \
     --do_not_auto_resume \
-    --wandb # \ --do_not_auto_resume \
+    --wandb # \ --do_not_auto_resume \ --fit_rho \
