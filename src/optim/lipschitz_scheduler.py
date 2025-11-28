@@ -5,6 +5,9 @@ This scheduler computes the learning rate based on the current loss and
 Lipschitz constant estimates:
 
     lr_t = Δ_t / (K_0 + K_1 * Δ_t + K_rho * Δ_t^ρ)
+    K_1 = 0 => lr_t = Δ_t / (K_0 + K_rho * Δ_t^ρ)
+    lt_t_max = lr. Delta_t^* (rho = 2) = sqrt(K_0 / K_rho) => lt_t_max = sqrt(K_0 / K_rho) / (K_0 + K_0) = sqrt(1 / (4 K_0 K_rho)) = lr
+    => K_0 = 1 / (4 lr^2 K_rho) ~ 1 / (C * lr^2 K_rho)
 
 where Δ_t = loss_t - loss_star (the optimality gap).
 """
