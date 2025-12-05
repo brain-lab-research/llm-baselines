@@ -7,7 +7,7 @@ python ./src/main.py \
     --model base \
     --dataset shakespeare-char \
     --opt muon \
-    --lr 1e-2 \
+    --lr 1e-1 \
     --momentum 0.9 \
     --iterations 1000 \
     --vocab_size 96 \
@@ -22,8 +22,7 @@ python ./src/main.py \
     --seed 0 \
     --weight_decay 1e-3 \
     --scheduler lipschitz \
-    --lipschitz_K_0 6 \
-    --lipschitz_K_1 1 \
+    --lipschitz_K_0_via_lr \
     --lipschitz_K_rho 1 \
     --lipschitz_rho 2.0 \
     --lipschitz_loss_star 0.0 \

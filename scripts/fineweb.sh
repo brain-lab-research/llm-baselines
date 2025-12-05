@@ -1,14 +1,14 @@
 #!/bin/bash
 # torchrun --nproc_per_node=2 --master_port=1234
 # --distributed_backend nccl \
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
 python ./src/main.py \
     --model llama \
     --dataset fineweb \
     --optimizer muon \
-    --lr 5e-6 \
-    --iterations 7000 \
+    --lr 1e-4 \
+    --iterations 32000 \
     --n_embd 768 \
     --n_head 12 \
     --n_layer 12 \

@@ -87,8 +87,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--lipschitz_K_rho", default=0.01, type=float)
     parser.add_argument("--lipschitz_rho", default=2.0, type=float)
     parser.add_argument("--lipschitz_loss_star", default=0.0, type=float)
-    parser.add_argument("--lipschitz_min_lr", default=1e-6, type=float)
-    parser.add_argument("--lipschitz_max_lr", default=1.0, type=float)
+    parser.add_argument("--lipschitz_adjust_K", action="store_true")
 
     # Optimization
     parser.add_argument(

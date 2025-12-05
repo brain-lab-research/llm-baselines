@@ -458,7 +458,7 @@ def main(args, parser):
                 max_lr=args.lr,  # [group.get("lr", args.lr) for group in group_specs],
                 first_final_lr_factor=args.dd_first_lr_factor,
                 second_final_lr_factor=0.0,  # stop with zero lr
-                div_factor=1e2,
+                div_factor=args.div_factor,
                 first_decay_type=args.decay_type,
                 second_decay_type=args.dd_second_decay_type,
             )
@@ -471,10 +471,10 @@ def main(args, parser):
                 K_rho=args.lipschitz_K_rho,
                 rho=args.lipschitz_rho,
                 loss_star=args.lipschitz_loss_star,
-                min_lr=args.lipschitz_min_lr,
-                max_lr=args.lipschitz_max_lr,
-                warmup_steps=args.warmup_steps,
-                warmup_start_lr=args.lr / args.div_factor,
+                min_lr=args.lr / args.div_factor,
+                max_lr=args.lr,
+                adjust_K=args.lipschitz_adjust_K,
+                lr=args.lr
             )
         else:
             raise NotImplementedError(f"Unknown scheduler type: {args.scheduler}.")

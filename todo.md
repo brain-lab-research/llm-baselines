@@ -8,7 +8,7 @@
 
 - [ ] попробовать поменять нормы
 
-- [ ] попробовать shakespear, vit, fine-tuning (bechmarks)
+- [ ] попробовать shakespear, vit, fine-tuning (benchmarks)
 
 ## Шедулер fineweb
 

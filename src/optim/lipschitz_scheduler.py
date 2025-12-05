@@ -14,7 +14,7 @@ where Δ_t = loss_t - loss_star (the optimality gap).
 
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
-
+import wandb
 
 class LipschitzScheduler(_LRScheduler):
     """
@@ -37,8 +37,6 @@ class LipschitzScheduler(_LRScheduler):
         loss_star: Estimated optimal loss value (default: 0.0)
         min_lr: Minimum learning rate (default: 1e-6)
         max_lr: Maximum learning rate (default: 1.0)
-        warmup_steps: Number of warmup steps (default: 0)
-        warmup_start_lr: Starting LR during warmup (default: 1e-8)
         epsilon: Small constant to avoid division by zero (default: 1e-8)
         last_epoch: The index of last epoch (default: -1)
     """
@@ -46,28 +44,31 @@ class LipschitzScheduler(_LRScheduler):
     def __init__(
         self,
         optimizer,
-        K_0=1.0,
-        K_1=0.1,
-        K_rho=0.01,
+        K_0=None,
+        K_1=0,
+        K_rho=None,
         rho=2.0,
         loss_star=0.0,
         min_lr=1e-6,
         max_lr=1.0,
-        warmup_steps=0,
-        warmup_start_lr=1e-8,
         epsilon=1e-8,
         last_epoch=-1,
+        adjust_K=False,
+        target="linear",
+        lr=None,
     ):
-        self.K_0 = K_0
-        self.K_1 = K_1
-        self.K_rho = K_rho
+        if not adjust_K:
+            self.K_0 = K_0
+            self.K_1 = K_1
+            self.K_rho = K_rho
+            print(f"Using parameters via args:\nK_0={self.K_0}, K_1={self.K_1}, K_rho={self.K_rho}")
         self.rho = rho
         self.loss_star = loss_star
         self.min_lr = min_lr
         self.max_lr = max_lr
-        self.warmup_steps = warmup_steps
-        self.warmup_start_lr = warmup_start_lr
         self.epsilon = epsilon
+        self.target = target
+        self.adjust_K = adjust_K
 
         # Current loss value (updated via step(loss))
         self.current_loss = None
@@ -83,7 +84,7 @@ class LipschitzScheduler(_LRScheduler):
         """
         # If no loss provided yet, return base learning rates
         if self.current_loss is None:
-            print("No loss provided for Lipschitz Scheduler")
+            print("No loss provided for Lipschitz Scheduler!")
             return self.base_lrs
 
         # Compute optimality gap
@@ -121,6 +122,31 @@ class LipschitzScheduler(_LRScheduler):
             loss: Current loss value (required for computing lr_t)
             epoch: Manual epoch number (optional)
         """
+        if self.adjust_K and self.current_loss is None and loss is not None:
+            assert self.rho == 2, "rho must equal to 2 for this weird formulas"
+            # lr, lr_0 = self.max_lr, self.min_lr
+            # div = lr / lr_0
+            # x0 = loss - self.loss_star
+            # sqrt_term = math.sqrt(4*div + 1)
+            # self.K_rho = 4 * div**2 * (div - 1) / (lr * x0 * (sqrt_term - 1)**2)
+            # self.K_0 = x0 * (div - 1) * (2*div + 1 - sqrt_term)**2 / (lr * (sqrt_term - 1)**2)
+            # self.K_1 = 1/lr - 4 * div * (div - 1) * (2*div + 1 - sqrt_term) / (lr * (sqrt_term - 1)**2)
+
+            # print(f"Using parameters via lr and min_lr:\nK_0={self.K_0}, K_1={self.K_1}, K_rho={self.K_rho}")
+            # x_star = x0 * (2*div + 1 - sqrt_term) / (2*div)
+            # print(f"Estimated Delta_t threshold: Delta_t = loss(x_t) - loss* = loss(x_t) - {self.loss_star} = {x_star}")
+
+            from .lipschitz_computeK import compute_lipschitz_constants
+            self.K_0, self.K_1, self.K_rho, delta_star = compute_lipschitz_constants(
+                lr=self.max_lr, lr_0=self.min_lr, x0=loss - self.loss_star, target=self.target)
+            if wandb.run:
+                wandb.log({
+                    "lipschitz_K_0": self.K_0,
+                    "lipschitz_K_1": self.K_1,
+                    "lipschitz_K_rho": self.K_rho,
+                    "lipschitz_delta_star": delta_star
+                })
+
         if loss is not None:
             self.current_loss = float(loss)
 
