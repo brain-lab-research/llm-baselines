@@ -390,9 +390,10 @@ def main(args, parser):
     print(f"\nOptimizer:\n{opt}")
 
     if args.scheduler != "none":
-        assert (
-            args.warmup_steps < args.iterations
-        ), "Warmup steps must be < iterations."  # from schedules-and-scaling
+        if args.scheduler not in ["lipschitz"]:
+            assert (
+                args.warmup_steps < args.iterations
+            ), "Warmup steps must be < iterations."  # from schedules-and-scaling
         if args.scheduler in ["cos", "linear"]:
             # initial lr is args.lr / div_factor
             # final lr is initial_lr/final_div_factor = args.lr / div_factor / final_div_factor
@@ -473,8 +474,12 @@ def main(args, parser):
                 loss_star=args.lipschitz_loss_star,
                 min_lr=args.lr / args.div_factor,
                 max_lr=args.lr,
-                adjust_K=args.lipschitz_adjust_K,
-                lr=args.lr
+                adjust_K=not args.lipschitz_not_adjust_K,
+                lr=args.lr,
+                max_steps=args.iterations,
+                mode=args.lipschitz_mode,
+                use_cos=args.lipschitz_use_cos,
+                target=args.lipschitz_target,
             )
         else:
             raise NotImplementedError(f"Unknown scheduler type: {args.scheduler}.")

@@ -47,7 +47,7 @@ def cosine_target(x, x_star, x0, eta_x_star, eta_x0):
 
 # Main function
 
-def compute_lipschitz_constants(lr, lr_0, x0, target='linear', verbose=False):
+def compute_lipschitz_constants(lr, lr_0, x0, target='linear', mode="func_prime", verbose=False):
     """
     Computes coefficients K0, K1, K2 for learning rate scheduler:
         eta(x) = x / (K0 + K1*x + K2*x^2)
@@ -98,17 +98,24 @@ def compute_lipschitz_constants(lr, lr_0, x0, target='linear', verbose=False):
             raise ValueError(f"Unknown target function '{target}'")
 
         def integrand(x):
-            eta_val = eta_func(x, K0, K1, K2)
-            eta_der = eta_prime(x, K0, K1, K2)
-            target_val, target_der = target_func(x)
-            return abs(eta_val - target_val) + abs(eta_der - target_der)
-
+            if mode == "func_prime":
+                eta_val = eta_func(x, K0, K1, K2)
+                eta_der = eta_prime(x, K0, K1, K2)
+                target_val, target_der = target_func(x)
+                return abs(eta_val - target_val) + abs(eta_der - target_der)
+            elif mode == "double_prime":
+                assert target == 'linear', "no implementation for cosine target with double prime mode yet"
+                return abs(eta_double_prime(x, K0, K1, K2))
+            elif mode == "intergral_0_x0":
+                return -eta_func(x, K0, K1, K2)
+        
+        x_start = 0.0 if mode == "intergral_0_x0" else x_star
         try:
-            integral, _ = quad(integrand, x_star, x0)
+            integral, _ = quad(integrand, x_start, x0)
         except:
             return np.inf
 
-        return abs(integral) / max(abs(x0 - x_star), 1e-12)
+        return integral / max(abs(x0 - x_start), 1e-12)
 
     def optimize_x_star(x_star):
         if x_star >= x0 or x_star <= 0:
@@ -191,3 +198,15 @@ def compute_lipschitz_constants(lr, lr_0, x0, target='linear', verbose=False):
         plt.show()
 
     return optimal_K0, optimal_K1, optimal_K2, optimal_x_star
+
+if __name__ == "__main__":
+    # Example usage
+    lr = 0.0003
+    div = 100
+    lr_0 = 0.0001
+    x0 = 7.0
+    target = 'linear'  # 'linear' or 'cosine'
+    mode = "double_prime"  # "func_prime", "double_prime", or "intergral_0_x0"
+
+    _ = compute_lipschitz_constants(lr, lr / div, x0, target=target, mode=mode, verbose=True)
+    _ = compute_lipschitz_constants(lr, lr / div, x0, target=target, mode="intergral_0_x0", verbose=True)

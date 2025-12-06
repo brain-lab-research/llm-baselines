@@ -87,7 +87,10 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--lipschitz_K_rho", default=0.01, type=float)
     parser.add_argument("--lipschitz_rho", default=2.0, type=float)
     parser.add_argument("--lipschitz_loss_star", default=0.0, type=float)
-    parser.add_argument("--lipschitz_adjust_K", action="store_true")
+    parser.add_argument("--lipschitz_not_adjust_K", action="store_true")
+    parser.add_argument("--lipschitz_target", default="linear", choices=["linear", "cosine"])
+    parser.add_argument("--lipschitz_mode", default="func_prime")
+    parser.add_argument("--lipschitz_use_cos", action="store_true")
 
     # Optimization
     parser.add_argument(
@@ -177,7 +180,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--lamb_use_bias_correction", default=False, type=bool)
 
     # Dataset params
-    parser.add_argument("--datasets_dir", type=str, default="./src/data/datasets/")
+    parser.add_argument("--datasets_dir", type=str, default="./../../../datasets/")
     parser.add_argument(
         "--dataset",
         default="slimpajama",

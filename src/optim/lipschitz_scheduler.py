@@ -15,6 +15,7 @@ where Δ_t = loss_t - loss_star (the optimality gap).
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 import wandb
+import math
 
 class LipschitzScheduler(_LRScheduler):
     """
@@ -56,6 +57,9 @@ class LipschitzScheduler(_LRScheduler):
         adjust_K=False,
         target="linear",
         lr=None,
+        max_steps=-1,
+        mode="func_prime",
+        use_cos=False,
     ):
         if not adjust_K:
             self.K_0 = K_0
@@ -67,7 +71,6 @@ class LipschitzScheduler(_LRScheduler):
         self.min_lr = min_lr
         self.max_lr = max_lr
         self.epsilon = epsilon
-        self.target = target
         self.adjust_K = adjust_K
 
         # Current loss value (updated via step(loss))
@@ -75,6 +78,10 @@ class LipschitzScheduler(_LRScheduler):
 
         # Store base learning rates
         self.base_lrs = [group['lr'] for group in optimizer.param_groups]
+        self.max_steps = max_steps
+        self.mode = mode
+        self.use_cos = use_cos
+        self.target = target
 
         super().__init__(optimizer, last_epoch=last_epoch)
 
@@ -90,6 +97,8 @@ class LipschitzScheduler(_LRScheduler):
         # Compute optimality gap
         delta_t = max(self.current_loss - self.loss_star, self.epsilon)
 
+        # Apply cosine scheduler if delta_t < delta_star
+
         # Compute denominator: K_0 + K_1 * Δ_t + K_rho * Δ_t^ρ
         denominator = self.K_0 + self.K_1 * delta_t + self.K_rho * (delta_t ** self.rho)
 
@@ -100,7 +109,16 @@ class LipschitzScheduler(_LRScheduler):
         lr = delta_t / denominator
 
         # Clamp to [min_lr, max_lr]
-        lr = max(self.min_lr, min(lr, self.max_lr))
+        lr = max(0, min(lr, self.max_lr))
+        
+        if delta_t < self.delta_star and self.max_steps > 0 and self.use_cos: #  
+            if not hasattr(self, '_cosine_step'):
+                self._cosine_step = 0
+            else:
+                self._cosine_step += 1
+            progress = self._cosine_step / self.max_steps
+            cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))
+            lr *= cosine_factor
 
         # Scale proportionally to base learning rates for each param group
         # This allows different param groups to have different relative LRs
@@ -137,14 +155,20 @@ class LipschitzScheduler(_LRScheduler):
             # print(f"Estimated Delta_t threshold: Delta_t = loss(x_t) - loss* = loss(x_t) - {self.loss_star} = {x_star}")
 
             from .lipschitz_computeK import compute_lipschitz_constants
-            self.K_0, self.K_1, self.K_rho, delta_star = compute_lipschitz_constants(
-                lr=self.max_lr, lr_0=self.min_lr, x0=loss - self.loss_star, target=self.target)
+            self.K_0, self.K_1, self.K_rho, self.delta_star = compute_lipschitz_constants(
+                lr=self.max_lr, 
+                lr_0=self.min_lr, 
+                x0=loss - self.loss_star, 
+                target=self.target,
+                mode=self.mode,
+            )
             if wandb.run:
+                print("Logging Lipschitz constants to wandb")
                 wandb.log({
                     "lipschitz_K_0": self.K_0,
                     "lipschitz_K_1": self.K_1,
                     "lipschitz_K_rho": self.K_rho,
-                    "lipschitz_delta_star": delta_star
+                    "lipschitz_delta_star": self.delta_star
                 })
 
         if loss is not None:
