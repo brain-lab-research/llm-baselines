@@ -3,11 +3,15 @@
 # --distributed_backend nccl \
 export CUDA_VISIBLE_DEVICES=1
 
+# python ./src/optim/lipschitz_analyzer.py \
+# python ./src/main.py \
+
 python ./src/main.py \
     --model llama \
     --dataset fineweb \
     --optimizer muon \
-    --lr 1e-4 \
+    --lr 1e-2 \
+    --muon_lr_factor 10 \
     --iterations 32000 \
     --n_embd 768 \
     --n_head 12 \
@@ -15,19 +19,17 @@ python ./src/main.py \
     --batch_size 64 \
     --sequence_length 512 \
     --acc_steps 1 \
-    --warmup_steps 500 \
-    --grad_clip 0 \
+    --warmup_steps 2000 \
+    --grad_clip 0.5 \
     --seed 0 \
     --weight_decay 0.1 \
     --scheduler none \
-    --div_factor 100 \
-    --final_div_factor 0.1 \
-    --momentum 0.9 \
-    --beta1 0.9 --beta2 0.95 \
+    --momentum 0.99 \
+    --dropout 0 \
+    --beta1 0.8 --beta2 0.999 \
     --dropout 0.0 \
     --eval_interval 115 --latest_ckpt_interval 1000 \
     --analyze_lipschitz \
-    --min_analysis_steps 100 \
     --weight_norm_type frobenius \
     --rho 2 \
     --f_star 3.2 \

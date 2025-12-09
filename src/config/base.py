@@ -90,7 +90,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--lipschitz_not_adjust_K", action="store_true")
     parser.add_argument("--lipschitz_target", default="linear", choices=["linear", "cosine"])
     parser.add_argument("--lipschitz_mode", default="func_prime")
-    parser.add_argument("--lipschitz_use_cos", action="store_true")
+    parser.add_argument("--use_lip_warmup", action="store_true")
 
     # Optimization
     parser.add_argument(
@@ -143,9 +143,9 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--normalize_grads", default=False, type=bool)
     parser.add_argument("--soap_data_format", default="channels_first", type=str)
     parser.add_argument("--correct_bias", default=True, type=bool)
-    parser.add_argument("--nesterov", default=False, type=bool)
+    parser.add_argument("--nesterov", default=True, type=bool)
     parser.add_argument("--muon_ns_steps", default=5, type=int)
-    parser.add_argument("--muon_lr_factor", default=1.0, type=float)
+    parser.add_argument("--muon_lr_factor", default=10.0, type=float)
     parser.add_argument("--adema_beta3", default=0.9, type=float)
     parser.add_argument("--adema_alpha", default=2.0, type=float)
     parser.add_argument("--adema_beta3_warmup", default=None, type=int)
@@ -180,7 +180,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--lamb_use_bias_correction", default=False, type=bool)
 
     # Dataset params
-    parser.add_argument("--datasets_dir", type=str, default="./../../../datasets/")
+    parser.add_argument("--datasets_dir", type=str, default="./src/data/datasets/")
     parser.add_argument(
         "--dataset",
         default="slimpajama",
@@ -226,7 +226,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--dropout", default=0.0, type=float)
     parser.add_argument("--n_head", default=12, type=int)
     parser.add_argument("--n_layer", default=24, type=int)  # depths in att + ff blocks
-    parser.add_argument("--sequence_length", default=128, type=int)
+    parser.add_argument("--sequence_length", default=512, type=int)
     parser.add_argument(
         "--n_embd", default=768, type=int  # embedding size / hidden size ...
     )

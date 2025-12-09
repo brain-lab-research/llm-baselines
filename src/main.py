@@ -2,6 +2,7 @@ import argparse
 import copy
 import inspect
 import json
+import math
 import os
 import random
 import sys
@@ -26,13 +27,12 @@ from optim.clipped import (AdagradClip, AdaGradClipDelayedEta, AdamClip,
 from optim.lamb import Lamb
 from optim.lion import Lion
 from optim.mars import MARS
-from optim.muon import CombinedScheduler, Muon
+from optim.muon import Muon
 from optim.normalized import NormalizedSGD
 from optim.lipschitz_analyzer import LipschitzAnalyzer
 from optim.lipschitz_scheduler import LipschitzScheduler
 from optim.prodigy import Prodigy
-from optim.schedule import (cos_inf_schedule, cosine_wsd_decay_schedule,
-                            dd_schedule, wsd_schedule)
+from optim.schedule import get_scheduler
 from optim.schedulefree import AdamWScheduleFree, SGDScheduleFree
 from optim.sgdf import SGDF
 from optim.shampoo import DistributedShampoo
@@ -166,7 +166,7 @@ def main(args, parser):
             nesterov=args.nesterov,
             ns_steps=args.muon_ns_steps,
             adamw_params=None,
-            adamw_lr=args.lr,
+            adamw_lr=args.lr / args.muon_lr_factor,
             adamw_betas=(args.beta1, args.beta2),
             adamw_eps=1e-8,
             adamw_wd=args.weight_decay,
@@ -390,81 +390,14 @@ def main(args, parser):
     print(f"\nOptimizer:\n{opt}")
 
     if args.scheduler != "none":
-        if args.scheduler not in ["lipschitz"]:
-            assert (
-                args.warmup_steps < args.iterations
-            ), "Warmup steps must be < iterations."  # from schedules-and-scaling
-        if args.scheduler in ["cos", "linear"]:
-            # initial lr is args.lr / div_factor
-            # final lr is initial_lr/final_div_factor = args.lr / div_factor / final_div_factor
-            scheduler = (
-                torch.optim.lr_scheduler.OneCycleLR(
-                    optimizer=opt,
-                    max_lr=[
-                        group.get("lr", args.lr) for group in group_specs
-                    ],  # it was args.lr
-                    total_steps=args.iterations,
-                    pct_start=args.warmup_steps / args.iterations,  # it was args.warmup_percent
-                    anneal_strategy=args.scheduler,
-                    cycle_momentum=False,
-                    div_factor=args.div_factor,
-                    final_div_factor=args.final_div_factor,
-                )
-                if args.opt != "muon"
-                else CombinedScheduler(opt, args)
-            )
-        elif args.scheduler == "cos_inf":
-            lambda_schedule = cos_inf_schedule(
-                n_iterations=args.iterations,
-                n_warmup=args.warmup_steps,
-                n_inf=args.cos_inf_steps,
-                div_factor=1e2,
-                final_div_factor=0.1,
-            )
-            scheduler = (
-                torch.optim.lr_scheduler.LambdaLR(opt, lambda_schedule)
-                if args.opt != "muon"
-                else CombinedScheduler(opt, args)
-            )
-        elif args.scheduler == "wsd":
-            lambda_schedule = wsd_schedule(
-                n_iterations=args.iterations,
-                n_warmup=args.warmup_steps,
-                fract_decay=args.wsd_fract_decay,
-                init_div_factor=1e2,
-                final_lr_factor=args.wsd_final_lr_scale,  # should be 0 here
-                decay_type=args.decay_type,
-            )
-            scheduler = (
-                torch.optim.lr_scheduler.LambdaLR(opt, lambda_schedule)
-                if args.opt != "muon"
-                else CombinedScheduler(opt, args)
-            )
-        elif args.scheduler == "cos_wsd":
-            lambda_schedule = cosine_wsd_decay_schedule(
-                n_iterations=args.iterations,
-                n_warmup=args.warmup_steps,
-                anneal_end_factor=0.15,  # 0.2
-                fract_decay=args.wsd_fract_decay,
-                init_div_factor=1e2,
-                final_lr_factor=0.1,  # should be 0 here
-                decay_type=args.decay_type,
-            )
-            scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda_schedule)
-        elif args.scheduler == "dd":
-            lambda_schedule = dd_schedule(
-                n_iterations=args.iterations,
-                n_warmup=args.warmup_steps,
-                fract_fisrt_decay=args.wsd_fract_decay,  # this will be responsible for the first decay phase
-                max_lr=args.lr,  # [group.get("lr", args.lr) for group in group_specs],
-                first_final_lr_factor=args.dd_first_lr_factor,
-                second_final_lr_factor=0.0,  # stop with zero lr
-                div_factor=args.div_factor,
-                first_decay_type=args.decay_type,
-                second_decay_type=args.dd_second_decay_type,
-            )
-            scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda_schedule)
-        elif args.scheduler == "lipschitz":
+        if args.use_lip_warmup: args.warmup_steps = 0
+        assert (
+            args.warmup_steps < args.iterations
+        ), "Warmup steps must be < iterations."
+
+        scheduler = get_scheduler(opt, args, group_specs=group_specs)
+
+        if args.use_lip_warmup:
             scheduler = LipschitzScheduler(
                 optimizer=opt,
                 K_0=args.lipschitz_K_0,
@@ -478,11 +411,11 @@ def main(args, parser):
                 lr=args.lr,
                 max_steps=args.iterations,
                 mode=args.lipschitz_mode,
-                use_cos=args.lipschitz_use_cos,
+                decay_scheduler=scheduler,
+                decay_scheduler_args=args,
+                decay_scheduler_group_specs=group_specs,
                 target=args.lipschitz_target,
             )
-        else:
-            raise NotImplementedError(f"Unknown scheduler type: {args.scheduler}.")
     else:
         scheduler = None
 
@@ -502,12 +435,11 @@ def main(args, parser):
     # Create Lipschitz analyzer
     lipschitz_analyzer = LipschitzAnalyzer(
         enabled=args.analyze_lipschitz,
-        max_analysis_steps=args.max_analysis_steps if args.max_analysis_steps is not None else args.iterations,
-        min_analysis_steps=args.min_analysis_steps if args.min_analysis_steps is not None else 0,
         weight_norm_type=args.weight_norm_type,
         fit_rho=args.fit_rho,
         rho=args.rho,
-        f_star=args.f_star
+        f_star=args.f_star,
+        results_dir=f"lip_points/{exp_name}" if args.analyze_lipschitz else None
     )
 
     stats = train(
@@ -562,7 +494,7 @@ def get_data_readers(args, verbose=True):
 def get_exp_name(
     args,
     parser,
-    distributed_backend,
+    distributed_backend=None,
     key_args=["model", "dataset", "opt"],
     ignore_args=[
         "eval_interval",
@@ -580,12 +512,13 @@ def get_exp_name(
         "do_not_auto_resume",
         "log_interval",
         "analyze_lipschitz",
+        "output_plot",
     ],
 ):
     # Get the default values
     defaults = vars(parser.parse_args([]))
 
-    rank = distributed_backend.rank
+    # rank = distributed_backend.rank
 
     # Generate the prefix with key arguments
     prefix_parts = []
@@ -595,7 +528,7 @@ def get_exp_name(
             prefix_parts.append(f"{key}-{value}")
 
     prefix = "_".join(prefix_parts)
-    prefix = f"{args.batch_size}x{args.acc_steps}(rank={rank})_" + prefix
+    prefix = f"{args.batch_size}x{args.acc_steps}_" + prefix
     # prefix = f"{args.batch_size}x{args.acc_steps}" + prefix
 
     # Generate the rest of the string with non-default arguments

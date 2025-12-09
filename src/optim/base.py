@@ -118,8 +118,19 @@ def train(
 
         # Train model
         t_start = time.perf_counter_ns()
+
+        # Store batch data for Lipschitz analysis (need same batch for gradient comparison)
+        batch_x_list = []
+        batch_y_list = []
+
         for microstep_idx in range(cfg.acc_steps):  # gradient accumulation
             x, y = get_batch(train_reader, device=cfg.device)
+
+            # Save batch for Lipschitz analysis
+            if lipschitz_analyzer and lipschitz_analyzer.is_enabled(curr_iter):
+                batch_x_list.append(x)
+                batch_y_list.append(y)
+
             with type_ctx:
                 with distributed_backend.get_context_for_microstep_forward(
                     model=model,
@@ -132,6 +143,13 @@ def train(
             loss.backward()
             substep += 1
 
+        # Save gradients and weights BEFORE opt.step for Lipschitz analysis
+        prev_grads_for_lipschitz = None
+        prev_weights_for_lipschitz = None
+        if lipschitz_analyzer and lipschitz_analyzer.is_enabled(curr_iter):
+            prev_grads_for_lipschitz = lipschitz_analyzer._get_model_grads_flat(model).clone().detach()
+            prev_weights_for_lipschitz = lipschitz_analyzer._get_model_weights_flat(model).clone().detach()
+        
         if cfg.grad_clip != 0.0:
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
                 grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -158,9 +176,40 @@ def train(
                 scheduler.step()
 
         # Update Lipschitz analyzer if enabled (must be after opt.step but before zero_grad)
-        if lipschitz_analyzer and lipschitz_analyzer.enabled:
-            train_loss = loss.detach().cpu().item() * cfg.acc_steps
-            lipschitz_analyzer.update(model, train_loss, curr_iter, cfg.opt)
+        if lipschitz_analyzer and lipschitz_analyzer.is_enabled(curr_iter):
+            # Recompute gradients on the same batch that was used for training
+            # This ensures we're comparing gradients computed on the same data
+            model.zero_grad()
+
+            recomputed_loss = 0
+            for microstep_idx in range(cfg.acc_steps):
+                x, y = batch_x_list[microstep_idx], batch_y_list[microstep_idx]
+                with type_ctx:
+                    with distributed_backend.get_context_for_microstep_forward(
+                        model=model,
+                        microstep_idx=microstep_idx,
+                        gradient_accumulation_steps=cfg.acc_steps,
+                    ):
+                        outputs = model(x, targets=y)
+
+                batch_loss = outputs["loss"] / cfg.acc_steps
+                batch_loss.backward()
+                recomputed_loss += batch_loss.detach().cpu().item()
+
+            # Now gradients are computed at new weights on the same batch
+            train_loss = recomputed_loss * cfg.acc_steps
+            current_grads_for_lipschitz = lipschitz_analyzer._get_model_grads_flat(model).clone().detach()
+            current_weights_for_lipschitz = lipschitz_analyzer._get_model_weights_flat(model).clone().detach()
+
+            # Update with both old and new gradients/weights on the SAME batch
+            lipschitz_analyzer.update_with_grads(
+                prev_grads=prev_grads_for_lipschitz,
+                current_grads=current_grads_for_lipschitz,
+                prev_weights=prev_weights_for_lipschitz,
+                current_weights=current_weights_for_lipschitz,
+                loss_val=train_loss,
+                iteration=curr_iter
+            )
 
         if cfg.opt == "sophiag":
             opt.zero_grad(set_to_none=True)

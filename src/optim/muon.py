@@ -334,6 +334,9 @@ class CombinedScheduler:
         for scheduler in self.schedulers:
             scheduler.step()
 
+    def get_last_lr(self):
+        return [scheduler.get_last_lr() for scheduler in self.schedulers]
+
     def state_dict(self):
         state_dict = {}
         for i, scheduler in enumerate(self.schedulers):

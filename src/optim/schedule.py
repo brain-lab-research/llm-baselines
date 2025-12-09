@@ -1,6 +1,114 @@
 import math
 
 import numpy as np
+import torch
+
+
+def get_scheduler(optimizer, args, n_iterations=None, group_specs=None):
+    """
+    Create a learning rate scheduler based on args configuration.
+
+    Args:
+        optimizer: The optimizer to wrap
+        args: Configuration object with scheduler parameters
+        n_iterations: Number of iterations (defaults to args.iterations)
+        group_specs: Parameter group specifications (for OneCycleLR max_lr)
+
+    Returns:
+        A learning rate scheduler instance
+    """
+    if n_iterations is None:
+        n_iterations = args.iterations
+
+    # If n_iterations is custom (different from args.iterations), we're re-initializing after warmup
+    is_reinit = (n_iterations != args.iterations)
+    use_div_factor_1 = is_reinit or args.use_lip_warmup
+
+    # Import CombinedScheduler if needed
+    if args.opt == "muon":
+        from .muon import CombinedScheduler
+
+    if args.scheduler in ["cos", "linear"]:
+        if args.opt != "muon":
+            return torch.optim.lr_scheduler.OneCycleLR(
+                optimizer=optimizer,
+                max_lr=[
+                    group.get("lr", args.lr) for group in (group_specs or [])
+                ] if group_specs else args.lr,
+                total_steps=n_iterations,
+                pct_start=args.warmup_steps / args.iterations,
+                anneal_strategy=args.scheduler,
+                cycle_momentum=False,
+                div_factor=1 if use_div_factor_1 else args.div_factor,
+                final_div_factor=args.final_div_factor,
+            )
+        else:
+            import copy
+            new_args = copy.copy(args)
+            new_args.iterations = n_iterations
+            return CombinedScheduler(optimizer, new_args)
+
+    elif args.scheduler == "cos_inf":
+        lambda_schedule = cos_inf_schedule(
+            n_iterations=n_iterations,
+            n_warmup=args.warmup_steps,
+            n_inf=args.cos_inf_steps,
+            div_factor=1 if use_div_factor_1 else 1e2,
+            final_div_factor=0.1,
+        )
+        if args.opt != "muon":
+            return torch.optim.lr_scheduler.LambdaLR(optimizer, lambda_schedule)
+        else:
+            import copy
+            new_args = copy.copy(args)
+            new_args.iterations = n_iterations
+            return CombinedScheduler(optimizer, new_args)
+
+    elif args.scheduler == "wsd":
+        lambda_schedule = wsd_schedule(
+            n_iterations=n_iterations,
+            n_warmup=args.warmup_steps,
+            fract_decay=args.wsd_fract_decay,
+            init_div_factor=1 if use_div_factor_1 else 1e2,
+            final_lr_factor=args.wsd_final_lr_scale,
+            decay_type=args.decay_type,
+        )
+        if args.opt != "muon":
+            return torch.optim.lr_scheduler.LambdaLR(optimizer, lambda_schedule)
+        else:
+            import copy
+            new_args = copy.copy(args)
+            new_args.iterations = n_iterations
+            return CombinedScheduler(optimizer, new_args)
+
+    elif args.scheduler == "cos_wsd":
+        lambda_schedule = cosine_wsd_decay_schedule(
+            n_iterations=n_iterations,
+            n_warmup=args.warmup_steps,
+            anneal_end_factor=0.15,
+            fract_decay=args.wsd_fract_decay,
+            init_div_factor=1 if use_div_factor_1 else 1e2,
+            final_lr_factor=0.1,
+            decay_type=args.decay_type,
+        )
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lambda_schedule)
+
+    elif args.scheduler == "dd":
+        lambda_schedule = dd_schedule(
+            n_iterations=n_iterations,
+            n_warmup=args.warmup_steps,
+            fract_fisrt_decay=args.wsd_fract_decay,
+            max_lr=args.lr,
+            first_final_lr_factor=args.dd_first_lr_factor,
+            second_final_lr_factor=0.0,
+            div_factor=1 if use_div_factor_1 else args.div_factor,
+            first_decay_type=args.decay_type,
+            second_decay_type=args.dd_second_decay_type,
+        )
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lambda_schedule)
+
+    else:
+        raise NotImplementedError(f"Unknown scheduler type: {args.scheduler}.")
 
 
 def cos_inf_schedule(n_iterations, n_warmup, div_factor, final_div_factor, n_inf):

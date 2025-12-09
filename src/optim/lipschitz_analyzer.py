@@ -1,6 +1,4 @@
-import torch
 import numpy as np
-import wandb
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for headless servers
 import matplotlib.pyplot as plt
@@ -8,6 +6,12 @@ from typing import Dict, Optional
 import io
 import base64
 import tqdm
+import json
+from pathlib import Path
+
+# Optional imports for training (not needed for CLI plotting)
+import torch
+import wandb
 
 
 class LipschitzAnalyzer:
@@ -25,12 +29,11 @@ class LipschitzAnalyzer:
     def __init__(
         self,
         enabled: bool = False,
-        max_analysis_steps: int = None,
-        min_analysis_steps: int = None,
         weight_norm_type: str = 'frobenius',
         rho: float = 2,
         f_star: float = 1.5,
-        fit_rho: bool = True
+        fit_rho: bool = True,
+        results_dir: Optional[str] = None
     ):
         self.enabled = enabled
         if not enabled:
@@ -39,11 +42,10 @@ class LipschitzAnalyzer:
         self.data_points = []  # List of (grad_diff_norm, loss_val, weight_diff_norm)
         self.prev_weights = None
         self.prev_grads = None
-        self.max_analysis_steps = max_analysis_steps
-        self.min_analysis_steps = min_analysis_steps
         self.rho = rho
         self.f_star = f_star
         self.fit_rho = fit_rho
+        self.results_dir = Path(results_dir) if results_dir else None
         if weight_norm_type == "frobenius":
             self.weight_norm_type = "fro"
             self.grad_norm_type = "fro"
@@ -51,10 +53,10 @@ class LipschitzAnalyzer:
             raise ValueError(f"Unsupported weight norm type: {weight_norm_type}")
 
     def is_enabled(self, iteration) -> bool:
-        enabled = self.enabled and (self.min_analysis_steps <= iteration <= self.max_analysis_steps)
+        enabled = self.enabled # and (self.min_analysis_steps <= iteration <= self.max_analysis_steps)
         return enabled
 
-    def _get_model_weights_flat(self, model: torch.nn.Module) -> torch.Tensor:
+    def _get_model_weights_flat(self, model) -> "torch.Tensor":
         """Get flattened model weights"""
         weights = []
         for param in model.parameters():
@@ -62,7 +64,7 @@ class LipschitzAnalyzer:
                 weights.append(param.data.view(-1))
         return torch.cat(weights)
 
-    def _get_model_grads_flat(self, model: torch.nn.Module) -> torch.Tensor:
+    def _get_model_grads_flat(self, model) -> "torch.Tensor":
         """Get flattened model gradients"""
         grads = []
         for param in model.parameters():
@@ -70,11 +72,11 @@ class LipschitzAnalyzer:
                 grads.append(param.grad.view(-1))
         return torch.cat(grads) if grads else None
 
-    def _norm(self, tensor: torch.Tensor, type: str = 'fro') -> float:
+    def _norm(self, tensor: "torch.Tensor", type: str = 'fro') -> float:
         """Compute norm"""
         return torch.norm(tensor, p=type).item()
 
-    def update(self, model: torch.nn.Module, loss_val: float, iteration: int, optimizer_name: str = "unknown"):
+    def update(self, model, loss_val: float, iteration: int, optimizer_name: str = "unknown"):
         """
         Update analyzer with current model state
 
@@ -114,7 +116,7 @@ class LipschitzAnalyzer:
                 self.data_points.append(data_point)
 
                 # Log to wandb
-                if wandb.run is not None:
+                if wandb.run:
                     wandb.log({
                         'lipschitz/grad_diff_norm': grad_diff_norm,
                         'lipschitz/loss_val': loss_val - self.f_star,
@@ -127,6 +129,59 @@ class LipschitzAnalyzer:
         # Update previous state
         self.prev_weights = current_weights.clone().detach()
         self.prev_grads = current_grads.clone().detach()
+
+    def update_with_grads(
+        self,
+        prev_grads: "torch.Tensor",
+        current_grads: "torch.Tensor",
+        prev_weights: "torch.Tensor",
+        current_weights: "torch.Tensor",
+        loss_val: float,
+        iteration: int
+    ):
+        """
+        Update analyzer with pre-computed gradients and weights
+        This is used when gradients are computed on the same batch before and after opt.step()
+
+        Args:
+            prev_grads: Gradients before opt.step() (on same batch)
+            current_grads: Gradients after opt.step() (on same batch)
+            prev_weights: Weights before opt.step()
+            current_weights: Weights after opt.step()
+            loss_val: Loss value
+            iteration: Current iteration number
+        """
+        if prev_grads is None or current_grads is None:
+            return
+
+        # Compute | ∇ loss(x) - ∇ loss(y) |_*
+        grad_diff = current_grads - prev_grads
+        grad_diff_norm = self._norm(grad_diff, type=self.grad_norm_type)
+
+        # Compute | x - y |
+        weight_diff = current_weights - prev_weights
+        weight_diff_norm = self._norm(weight_diff, type=self.weight_norm_type)
+
+        # Store data point
+        if weight_diff_norm > 1e-12:  # Avoid division by zero
+            data_point = {
+                'grad_diff_norm': grad_diff_norm,
+                'loss_val': loss_val - self.f_star,
+                'weight_diff_norm': weight_diff_norm,
+                'iteration': iteration
+            }
+            self.data_points.append(data_point)
+
+            # Log to wandb
+            if wandb.run:
+                wandb.log({
+                    'lipschitz/grad_diff_norm': grad_diff_norm,
+                    'lipschitz/loss_val': loss_val - self.f_star,
+                    'lipschitz/weight_diff_norm': weight_diff_norm,
+                    'lipschitz/ratio': grad_diff_norm / weight_diff_norm,
+                    'lipschitz/loss': loss_val - self.f_star,
+                    'iter': iteration
+                })
 
     def _fit_least_squares(
         self, grad_diff_norms: np.ndarray,
@@ -307,6 +362,23 @@ class LipschitzAnalyzer:
             traceback.print_exc()
             return None
 
+    def save_data(self, filepath: Path):
+        """Save collected data points to JSON file"""
+        data_to_save = {
+            'data_points': self.data_points,
+            'config': {
+                'rho': self.rho,
+                'f_star': self.f_star,
+                'fit_rho': self.fit_rho,
+                'weight_norm_type': self.weight_norm_type,
+                'grad_norm_type': self.grad_norm_type,
+            }
+        }
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, 'w') as f:
+            json.dump(data_to_save, f, indent=2)
+        print(f"Saved Lipschitz analysis data to {filepath}")
+
     def finalize_analysis(self):
         """
         Perform final analysis and logging at the end of training
@@ -314,6 +386,11 @@ class LipschitzAnalyzer:
 
         print("\n=== Lipschitz Analysis Results ===")
         print(f"Collected {len(self.data_points)} data points")
+
+        # Save data to file if results directory is specified
+        if self.results_dir and len(self.data_points) > 0:
+            data_file = self.results_dir / "lipschitz_analysis_data.json"
+            self.save_data(data_file)
 
         if len(self.data_points) > 0:
             # Show summary statistics
@@ -354,7 +431,7 @@ class LipschitzAnalyzer:
             print(f"  Validation: {violations}/{len(ratios)} points above bound ({100*violations/len(ratios):.1f}%)")
 
             # Log to wandb
-            if wandb.run is not None:
+            if wandb.run:
                 wandb.log({
                     'lipschitz/final_K_0': fitted_params['K_0'],
                     'lipschitz/final_K_1': fitted_params['K_1'],
@@ -377,8 +454,11 @@ class LipschitzAnalyzer:
 
                         image_data = base64.b64decode(plot_image)
                         image = Image.open(io.BytesIO(image_data))
-                        wandb.log({"lipschitz/analysis_plot": wandb.Image(image)})
-                        print("Plot successfully logged to W&B!")
+                        if wandb.run:
+                            wandb.log({"lipschitz/analysis_plot": wandb.Image(image)})
+                            print("Plot successfully logged to W&B!")
+                        else:
+                            print("W&B not available, skipping W&B logging")
                     except Exception as e:
                         print(f"Error logging plot to W&B: {e}")
                         import traceback
@@ -387,3 +467,138 @@ class LipschitzAnalyzer:
                     print("Failed to create plot - check matplotlib and PIL installation")
         else:
             print("Failed to fit parameters")
+
+
+def load_and_plot(data_path: str, output_path: Optional[str] = None,
+    min_analysis_steps: int = 0, max_analysis_steps: int = -1):
+    """
+    Load saved Lipschitz analysis data and create plots
+
+    Args:
+        data_path: Path to JSON file with saved data
+        output_path: Optional path to save the plot image
+    """
+    data_path = Path(data_path)
+
+    if not data_path.exists():
+        print(f"Error: Data file not found at {data_path}")
+        return
+
+    # Load data
+    with open(f"{data_path}/lipschitz_analysis_data.json", 'r') as f:
+        saved_data = json.load(f)
+
+    data_points = saved_data['data_points']
+    mx_len = len(data_points) if max_analysis_steps == -1 else max_analysis_steps
+    data_points = data_points[min_analysis_steps:mx_len]
+    config = saved_data['config']
+
+    print(f"\nLoaded {len(data_points)} data points")
+    print(f"Configuration: {config}")
+
+    if len(data_points) < 10:
+        print("Insufficient data points for analysis (need at least 10)")
+        return
+
+    # Create analyzer instance to use its methods
+    analyzer = LipschitzAnalyzer(
+        enabled=True,
+        rho=config['rho'],
+        f_star=config['f_star'],
+        fit_rho=config['fit_rho']
+    )
+    analyzer.data_points = data_points
+
+    # Fit parameters
+    print("\nFitting parameters...")
+    fitted_params = analyzer.fit_parameters()
+
+    if fitted_params:
+        fit_status = "fitted" if config['fit_rho'] else "fixed"
+        print(f"\nFitted parameters (ρ = {fitted_params['rho']:.3f} {fit_status}):")
+        print(f"  K_0 = {fitted_params['K_0']:.6e}")
+        print(f"  K_1 = {fitted_params['K_1']:.6e}")
+        print(f"  ρ = {fitted_params['rho']:.3f} ({fit_status})")
+        print(f"  K_ρ = {fitted_params['K_rho']:.6e}")
+        print(f"  R² = {fitted_params.get('r_squared', 0):.6f}")
+
+        # Validation check
+        grad_norms = np.array([dp['grad_diff_norm'] for dp in data_points])
+        weight_norms = np.array([dp['weight_diff_norm'] for dp in data_points])
+        losses = np.array([dp['loss_val'] for dp in data_points])
+
+        ratios = grad_norms / weight_norms
+        fitted_vals = fitted_params['K_0'] + fitted_params['K_1'] * losses + fitted_params['K_rho'] * losses**fitted_params['rho']
+        violations = np.sum(ratios > fitted_vals)
+        print(f"  Validation: {violations}/{len(ratios)} points above bound ({100*violations/len(ratios):.1f}%)")
+
+        # Create plot
+        print("\nCreating plot...")
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        iterations = np.array([dp['iteration'] for dp in data_points])
+
+        # Main scatter plot with color mapping by iteration
+        scatter = ax.scatter(losses, ratios, c=iterations, cmap='coolwarm',
+                           alpha=0.7, s=30, edgecolors='black', linewidth=0.5)
+
+        # Add colorbar
+        cbar = plt.colorbar(scatter, ax=ax)
+        cbar.set_label('Training Iteration', fontsize=10)
+
+        ax.set_xlabel(f'loss(x) - loss(x*) = loss(x) - {config["f_star"]}', fontsize=12)
+        ax.set_ylabel('||∇loss(x) - ∇loss(y)||_* / ||x - y||', fontsize=12)
+        ax.set_title('Lipschitz Analysis: Data vs Fitted Line', fontsize=14)
+        ax.grid(True, alpha=0.3)
+
+        # Plot fitted line
+        K_0, K_1, K_rho = fitted_params['K_0'], fitted_params['K_1'], fitted_params['K_rho']
+        rho = fitted_params['rho']
+        r_squared = fitted_params.get('r_squared', 0)
+        loss_range = np.linspace(losses.min(), losses.max(), 100)
+        fitted_line = K_0 + K_1 * loss_range + K_rho * loss_range**rho
+
+        ax.plot(loss_range, fitted_line, 'r-', linewidth=3,
+                label=f'Fitted line: K_0 + K_1·loss + K_ρ·loss^{rho:.2f}\nK_0={K_0:.2f}, K_1={K_1:.2f}, K_ρ={K_rho:.2f}\nρ={rho:.2f} ({fit_status}), R²={r_squared:.3f}')
+
+        # Add statistics
+        violation_pct = 100 * violations / len(ratios)
+        ax.text(0.02, 0.98, f'Points above line: {violations}/{len(ratios)} ({violation_pct:.1f}%)',
+               transform=ax.transAxes, verticalalignment='top',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+        threshold = (K_0 / (K_rho * (rho - 1)))**rho if rho > 1 else 0
+        ax.text(0.02, 0.07, f'Estimated threshold: {threshold:.4f}',
+               transform=ax.transAxes, verticalalignment='top',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+        ax.legend(fontsize=11, loc='upper right')
+        plt.tight_layout()
+
+        # Save plot
+        if output_path:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, dpi=150, bbox_inches='tight')
+            print(f"Saved plot to {output_path}")
+        else:
+            # Save to same directory as data file
+            output_path = data_path / f"lipschitz_analysis_plot_min={min_analysis_steps}_max={max_analysis_steps}.png"
+            plt.savefig(output_path, dpi=150, bbox_inches='tight')
+            print(f"Saved plot to {output_path}")
+
+        plt.close()
+    else:
+        print("Failed to fit parameters")
+
+if __name__ == "__main__":
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from main import get_exp_name, get_args
+
+    args, parser = get_args()
+    run_name = get_exp_name(args, parser)
+
+    min_analysis_steps, max_analysis_steps = 0, 30000
+
+    load_and_plot(f"lip_points/{run_name}", None, min_analysis_steps, max_analysis_steps)

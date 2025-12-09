@@ -15,7 +15,6 @@ where Δ_t = loss_t - loss_star (the optimality gap).
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 import wandb
-import math
 
 class LipschitzScheduler(_LRScheduler):
     """
@@ -40,6 +39,9 @@ class LipschitzScheduler(_LRScheduler):
         max_lr: Maximum learning rate (default: 1.0)
         epsilon: Small constant to avoid division by zero (default: 1e-8)
         last_epoch: The index of last epoch (default: -1)
+        decay_scheduler: Scheduler to use after Lipschitz phase
+        decay_scheduler_args: Args object for recreating decay_scheduler
+        decay_scheduler_group_specs: Group specs for recreating decay_scheduler
     """
 
     def __init__(
@@ -59,7 +61,9 @@ class LipschitzScheduler(_LRScheduler):
         lr=None,
         max_steps=-1,
         mode="func_prime",
-        use_cos=False,
+        decay_scheduler=None,
+        decay_scheduler_args=None,
+        decay_scheduler_group_specs=None,
     ):
         if not adjust_K:
             self.K_0 = K_0
@@ -73,92 +77,85 @@ class LipschitzScheduler(_LRScheduler):
         self.epsilon = epsilon
         self.adjust_K = adjust_K
 
-        # Current loss value (updated via step(loss))
         self.current_loss = None
 
-        # Store base learning rates
         self.base_lrs = [group['lr'] for group in optimizer.param_groups]
         self.max_steps = max_steps
         self.mode = mode
-        self.use_cos = use_cos
         self.target = target
+        self.decay_scheduler = decay_scheduler
+        self.decay_scheduler_args = decay_scheduler_args
+        self.decay_scheduler_group_specs = decay_scheduler_group_specs
+        self.current_step = 0
+        self.use_decay_scheduler = False
 
         super().__init__(optimizer, last_epoch=last_epoch)
 
     def get_lr(self):
-        """
-        Compute learning rate for each parameter group.
-        """
-        # If no loss provided yet, return base learning rates
         if self.current_loss is None:
             print("No loss provided for Lipschitz Scheduler!")
             return self.base_lrs
 
-        # Compute optimality gap
+        if self.use_decay_scheduler and self.decay_scheduler is not None:
+            return self.decay_scheduler.get_last_lr()
+
         delta_t = max(self.current_loss - self.loss_star, self.epsilon)
 
-        # Apply cosine scheduler if delta_t < delta_star
+        if delta_t <= self.delta_star and self.decay_scheduler is not None:
+            if not self.use_decay_scheduler:
+                # Re-initialize decay_scheduler with correct total_steps
+                self._reinit_decay_scheduler()
+            self.use_decay_scheduler = True
 
-        # Compute denominator: K_0 + K_1 * Δ_t + K_rho * Δ_t^ρ
+            return self.decay_scheduler.get_last_lr()
+
         denominator = self.K_0 + self.K_1 * delta_t + self.K_rho * (delta_t ** self.rho)
-
-        # Avoid division by zero
         denominator = max(denominator, self.epsilon)
 
-        # Compute learning rate: lr_t = Δ_t / denominator
         lr = delta_t / denominator
-
-        # Clamp to [min_lr, max_lr]
         lr = max(0, min(lr, self.max_lr))
-        
-        if delta_t < self.delta_star and self.max_steps > 0 and self.use_cos: #  
-            if not hasattr(self, '_cosine_step'):
-                self._cosine_step = 0
-            else:
-                self._cosine_step += 1
-            progress = self._cosine_step / self.max_steps
-            cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))
-            lr *= cosine_factor
 
-        # Scale proportionally to base learning rates for each param group
-        # This allows different param groups to have different relative LRs
         if len(self.base_lrs) == 1:
             return [lr]
         else:
-            # Scale according to the ratio of base_lrs
             base_lr_sum = sum(self.base_lrs)
             if base_lr_sum > 0:
                 return [lr * (base_lr / self.base_lrs[0]) for base_lr in self.base_lrs]
             else:
                 return [lr] * len(self.base_lrs)
 
+    def _reinit_decay_scheduler(self):
+        """Re-initialize decay_scheduler with correct parameters using get_scheduler."""
+        if self.decay_scheduler is None:
+            return
+
+        remaining_steps = self.max_steps - self.current_step
+        print(f"Re-initializing decay_scheduler with remaining_steps={remaining_steps}")
+
+        if self.decay_scheduler_args is not None:
+            try:
+                from .schedule import get_scheduler
+                self.decay_scheduler = get_scheduler(
+                    self.optimizer,
+                    self.decay_scheduler_args,
+                    n_iterations=remaining_steps,
+                    group_specs=self.decay_scheduler_group_specs
+                )
+                print(f"Successfully re-initialized decay_scheduler using get_scheduler")
+            except Exception as e:
+                print(f"Warning: Failed to re-initialize decay_scheduler: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("Warning: decay_scheduler_args not provided, cannot re-initialize scheduler")
+
     def step(self, loss=None, epoch=None):
-        """
-        Update learning rate.
-
-        Args:
-            loss: Current loss value (required for computing lr_t)
-            epoch: Manual epoch number (optional)
-        """
         if self.adjust_K and self.current_loss is None and loss is not None:
-            assert self.rho == 2, "rho must equal to 2 for this weird formulas"
-            # lr, lr_0 = self.max_lr, self.min_lr
-            # div = lr / lr_0
-            # x0 = loss - self.loss_star
-            # sqrt_term = math.sqrt(4*div + 1)
-            # self.K_rho = 4 * div**2 * (div - 1) / (lr * x0 * (sqrt_term - 1)**2)
-            # self.K_0 = x0 * (div - 1) * (2*div + 1 - sqrt_term)**2 / (lr * (sqrt_term - 1)**2)
-            # self.K_1 = 1/lr - 4 * div * (div - 1) * (2*div + 1 - sqrt_term) / (lr * (sqrt_term - 1)**2)
-
-            # print(f"Using parameters via lr and min_lr:\nK_0={self.K_0}, K_1={self.K_1}, K_rho={self.K_rho}")
-            # x_star = x0 * (2*div + 1 - sqrt_term) / (2*div)
-            # print(f"Estimated Delta_t threshold: Delta_t = loss(x_t) - loss* = loss(x_t) - {self.loss_star} = {x_star}")
-
             from .lipschitz_computeK import compute_lipschitz_constants
             self.K_0, self.K_1, self.K_rho, self.delta_star = compute_lipschitz_constants(
-                lr=self.max_lr, 
-                lr_0=self.min_lr, 
-                x0=loss - self.loss_star, 
+                lr=self.max_lr,
+                lr_0=self.min_lr,
+                x0=loss - self.loss_star,
                 target=self.target,
                 mode=self.mode,
             )
@@ -174,22 +171,24 @@ class LipschitzScheduler(_LRScheduler):
         if loss is not None:
             self.current_loss = float(loss)
 
-        # Call parent step to update last_epoch and apply new lr
+        self.current_step += 1
         super().step(epoch)
 
+        if self.use_decay_scheduler and self.decay_scheduler is not None:
+            self.decay_scheduler.step()
+
     def state_dict(self):
-        """
-        Return the state of the scheduler as a dict.
-        """
         state = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ('optimizer', 'is_better')
+            if key not in ('optimizer', 'is_better', 'decay_scheduler', 'decay_scheduler_args', 'decay_scheduler_group_specs')
         }
+        if self.decay_scheduler is not None:
+            state['decay_scheduler_state'] = self.decay_scheduler.state_dict()
         return state
 
     def load_state_dict(self, state_dict):
-        """
-        Load the scheduler's state.
-        """
+        decay_scheduler_state = state_dict.pop('decay_scheduler_state', None)
         self.__dict__.update(state_dict)
+        if decay_scheduler_state is not None and self.decay_scheduler is not None:
+            self.decay_scheduler.load_state_dict(decay_scheduler_state)
