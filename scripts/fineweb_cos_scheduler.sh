@@ -3,9 +3,7 @@
 # --distributed_backend nccl \
 export CUDA_VISIBLE_DEVICES=4
 
-#  384000 512000 1024000
-
-for iter in 64000
+for ws in 500 1000 1500 2000 2500 3000 3500 4000
 do
     python ./src/main.py \
         --model llama \
@@ -13,7 +11,7 @@ do
         --optimizer signum \
         --lr 1e-4 \
         --div_factor 100.0 \
-        --iterations $iter \
+        --iterations 64000 \
         --n_embd 768 \
         --n_head 12 \
         --n_layer 12 \
@@ -24,10 +22,7 @@ do
         --seed 0 \
         --weight_decay 0.1 \
         --scheduler cos \
-        --use_lip_warmup \
-        --lipschitz_rho 2.0 \
-        --lipschitz_mode linear_and_cos \
-        --lipschitz_loss_star 3.61 \
+        --warmup_steps $ws \
         --momentum 0.95 \
         --dropout 0 \
         --beta1 0.8 --beta2 0.999 \
@@ -36,6 +31,3 @@ do
         --do_not_auto_resume \
         --wandb # \ --do_not_auto_resume \ --fit_rho \ --warmup_steps 2000 \
 done
-
-# lipschitz_mode: double_prime func_prime intergral_0_x0
-# lipschitz_target: cosine linear
