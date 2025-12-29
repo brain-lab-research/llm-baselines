@@ -27,7 +27,7 @@ from optim.clipped import (AdagradClip, AdaGradClipDelayedEta, AdamClip,
 from optim.lamb import Lamb
 from optim.lion import Lion
 from optim.mars import MARS
-from optim.muon import Muon
+from optim.muon import Muon, DistributedMuon
 from optim.normalized import NormalizedSGD
 from optim.lipschitz_analyzer import LipschitzAnalyzer
 from optim.lipschitz_scheduler import LipschitzScheduler
@@ -170,6 +170,17 @@ def main(args, parser):
             adamw_betas=(args.beta1, args.beta2),
             adamw_eps=1e-8,
             adamw_wd=args.weight_decay,
+        )
+    elif args.opt == "d-muon":
+        opt = DistributedMuon(
+            group_specs,
+            lr=args.lr,
+            momentum=args.momentum,
+            nesterov=args.nesterov,
+            ns_steps=args.muon_ns_steps,
+            adamw_betas=(args.beta1, args.beta2),
+            adamw_eps=1e-8,
+            weight_decay=args.weight_decay,
         )
     elif args.opt == "ademamix":
         opt = AdEMAMix(

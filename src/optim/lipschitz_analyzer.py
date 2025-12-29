@@ -29,7 +29,7 @@ class LipschitzAnalyzer:
     def __init__(
         self,
         enabled: bool = False,
-        weight_norm_type: str = 'frobenius',
+        weight_norm_type: str = 'fro',
         rho: float = 2,
         f_star: float = 1.5,
         fit_rho: bool = True,
@@ -46,9 +46,15 @@ class LipschitzAnalyzer:
         self.f_star = f_star
         self.fit_rho = fit_rho
         self.results_dir = Path(results_dir) if results_dir else None
-        if weight_norm_type == "frobenius":
+        if weight_norm_type == "fro":
             self.weight_norm_type = "fro"
-            self.grad_norm_type = "fro"
+            self.grad_norm_type = "fro*"
+        elif weight_norm_type == "muon":
+            self.weight_norm_type = "muon"
+            self.grad_norm_type = "muon*"
+        elif weight_norm_type == "signum":
+            self.weight_norm_type = "signum"
+            self.grad_norm_type = "signum*"
         else:
             raise ValueError(f"Unsupported weight norm type: {weight_norm_type}")
 
@@ -56,79 +62,39 @@ class LipschitzAnalyzer:
         enabled = self.enabled # and (self.min_analysis_steps <= iteration <= self.max_analysis_steps)
         return enabled
 
-    def _get_model_weights_flat(self, model) -> "torch.Tensor":
+    def _get_model_weights_flat(self, model):
         """Get flattened model weights"""
         weights = []
         for param in model.parameters():
-            if param.requires_grad:
-                weights.append(param.data.view(-1))
-        return torch.cat(weights)
+            if param.requires_grad and param.grad is not None:
+                weights.append(param.data.clone().detach())
+        return weights
 
-    def _get_model_grads_flat(self, model) -> "torch.Tensor":
+    def _get_model_grads_flat(self, model):
         """Get flattened model gradients"""
         grads = []
         for param in model.parameters():
             if param.requires_grad and param.grad is not None:
-                grads.append(param.grad.view(-1))
-        return torch.cat(grads) if grads else None
+                grads.append(param.grad.clone().detach())
+        return grads
 
-    def _norm(self, tensor: "torch.Tensor", type: str = 'fro') -> float:
-        """Compute norm"""
-        return torch.norm(tensor, p=type).item()
+    def _norm(self, tensors, type: str = 'fro') -> float:
+        """Compute norm over an iterable of tensors."""
+        if type == "muon":
+            return max(torch.linalg.norm(t, ord=2) for t in tensors if t.dim() == 2)
+        elif type == "muon*":
+            return sum(torch.linalg.norm(t, ord="nuc") for t in tensors if t.dim() == 2)
+        elif type == "signum":
+            return max(torch.linalg.vector_norm(t, ord=float('inf')) for t in tensors if t.dim() == 2)
+        elif type == "signum*":
+            return sum(torch.linalg.vector_norm(t, ord=1) for t in tensors if t.dim() == 2)
+        elif type == "fro":
+            return max(torch.linalg.norm(t, ord="fro") for t in tensors if t.dim() == 2)
+        elif type == "fro*":
+            return sum(torch.linalg.norm(t, ord="fro") for t in tensors if t.dim() == 2)
+        else:
+            raise ValueError(f"Unsupported norm type: {type}!!!")
 
-    def update(self, model, loss_val: float, iteration: int, optimizer_name: str = "unknown"):
-        """
-        Update analyzer with current model state
-
-        Args:
-            model: Current model
-            loss_val: Current loss value
-            iteration: Current iteration number
-            optimizer_name: Name of the optimizer being used
-        """
-        if not self.is_enabled(iteration):
-            return
-        # Get current weights and gradients
-        current_weights = self._get_model_weights_flat(model)
-        current_grads = self._get_model_grads_flat(model)
-
-        if current_grads is None:
-            return
-
-        # If we have previous state, compute metrics
-        if self.prev_weights is not None and self.prev_grads is not None:
-            # Compute | ∇ loss(x) - ∇ loss(y) |_*
-            grad_diff = current_grads - self.prev_grads
-            grad_diff_norm = self._norm(grad_diff, type=self.grad_norm_type)
-
-            # Compute | x - y |
-            weight_diff = current_weights - self.prev_weights
-            weight_diff_norm = self._norm(weight_diff, type=self.weight_norm_type)
-
-            # Store data point (assuming loss(x*) = 0)
-            if weight_diff_norm > 1e-12:  # Avoid division by zero
-                data_point = {
-                    'grad_diff_norm': grad_diff_norm,
-                    'loss_val': loss_val - self.f_star,
-                    'weight_diff_norm': weight_diff_norm,
-                    'iteration': iteration
-                }
-                self.data_points.append(data_point)
-
-                # Log to wandb
-                if wandb.run:
-                    wandb.log({
-                        'lipschitz/grad_diff_norm': grad_diff_norm,
-                        'lipschitz/loss_val': loss_val - self.f_star,
-                        'lipschitz/weight_diff_norm': weight_diff_norm,
-                        'lipschitz/ratio': grad_diff_norm / weight_diff_norm,
-                        'lipschitz/loss': loss_val - self.f_star,
-                        'iter': iteration
-                    })
-
-        # Update previous state
-        self.prev_weights = current_weights.clone().detach()
-        self.prev_grads = current_grads.clone().detach()
 
     def update_with_grads(
         self,
@@ -154,20 +120,24 @@ class LipschitzAnalyzer:
         if prev_grads is None or current_grads is None:
             return
 
-        # Compute | ∇ loss(x) - ∇ loss(y) |_*
-        grad_diff = current_grads - prev_grads
-        grad_diff_norm = self._norm(grad_diff, type=self.grad_norm_type)
+        # Compute | ∇ loss(x) - ∇ loss(y) |_* and | x - y |
+        # grad_diff = current_grads - prev_grads
+        grad_diff_norm = self._norm(
+            (cg - pg for cg, pg in zip(current_grads, prev_grads)),
+            type=self.grad_norm_type
+        )
 
-        # Compute | x - y |
-        weight_diff = current_weights - prev_weights
-        weight_diff_norm = self._norm(weight_diff, type=self.weight_norm_type)
+        weight_diff_norm = self._norm(
+            (cw - pw for cw, pw in zip(current_weights, prev_weights)),
+            type=self.weight_norm_type
+        )
 
         # Store data point
         if weight_diff_norm > 1e-12:  # Avoid division by zero
             data_point = {
-                'grad_diff_norm': grad_diff_norm,
+                'grad_diff_norm': grad_diff_norm.item(),
                 'loss_val': loss_val - self.f_star,
-                'weight_diff_norm': weight_diff_norm,
+                'weight_diff_norm': weight_diff_norm.item(),
                 'iteration': iteration
             }
             self.data_points.append(data_point)
@@ -327,20 +297,21 @@ class LipschitzAnalyzer:
 
                 fit_status = "fitted" if self.fit_rho else "fixed"
                 ax.plot(loss_range, fitted_line, 'r-', linewidth=3,
-                        label=f'Fitted line: K_0 + K_1·loss + K_ρ·loss^{rho:.2f}\nK_0={K_0:.2f}, K_1={K_1:.2f}, K_ρ={K_rho:.2f}\nρ={rho:.2f} ({fit_status}), R²={r_squared:.3f}')
+                        label=f'Fitted line: K_0 + K_1·loss + K_ρ·loss^{rho:.2f}\nR2 score = {r_squared:.3f}')
+                        #\nK_0={K_0:.2f}, K_1={K_1:.2f}, K_ρ={K_rho:.2f}\nρ={rho:.2f} ({fit_status}), R²={r_squared:.3f}')
 
                 # Add some visual validation
                 fitted_vals = K_0 + K_1 * loss_vals + K_rho * loss_vals**rho
                 violations = np.sum(ratios > fitted_vals)
                 total_points = len(ratios)
                 violation_pct = 100 * violations / total_points
-                ax.text(0.02, 0.98, f'Points above line: {violations}/{total_points} ({violation_pct:.1f}%)',
-                       transform=ax.transAxes, verticalalignment='top',
-                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-                threshold = (K_0 / (K_rho * (rho - 1)))**rho
-                ax.text(0.02, 0.07, f'Estimated threshold: {threshold:.4f}',
-                       transform=ax.transAxes, verticalalignment='top',
-                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+                # ax.text(0.02, 0.98, f'Points above line: {violations}/{total_points} ({violation_pct:.1f}%)',
+                #        transform=ax.transAxes, verticalalignment='top',
+                #        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+                # threshold = (K_0 / (K_rho * (rho - 1)))**rho
+                # ax.text(0.02, 0.07, f'Estimated threshold: {threshold:.4f}',
+                #        transform=ax.transAxes, verticalalignment='top',
+                #        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
             ax.legend(fontsize=11, loc='upper right')
 
@@ -470,7 +441,7 @@ class LipschitzAnalyzer:
 
 
 def load_and_plot(data_path: str, output_path: Optional[str] = None,
-    min_analysis_steps: int = 0, max_analysis_steps: int = -1):
+    min_analysis_steps: int = 0, max_analysis_steps: int = -1, max_fit_steps: int = -1):
     """
     Load saved Lipschitz analysis data and create plots
 
@@ -495,7 +466,16 @@ def load_and_plot(data_path: str, output_path: Optional[str] = None,
 
     print(f"\nLoaded {len(data_points)} data points")
     print(f"Configuration: {config}")
-
+    
+    # Filter outliers using 0.01 and 0.99 percentiles of ratios
+    grad_norms = np.array([dp['grad_diff_norm'] for dp in data_points])
+    weight_norms = np.array([dp['weight_diff_norm'] for dp in data_points])
+    ratios = grad_norms / weight_norms
+    low, high = np.percentile(ratios, [1, 99])
+    filtered = [dp for dp, r in zip(data_points, ratios) if low <= r <= high]
+    print(f"Filtered outliers: {len(data_points) - len(filtered)} removed, {len(filtered)} remain")
+    data_points = filtered
+    
     if len(data_points) < 10:
         print("Insufficient data points for analysis (need at least 10)")
         return
@@ -507,7 +487,8 @@ def load_and_plot(data_path: str, output_path: Optional[str] = None,
         f_star=config['f_star'],
         fit_rho=config['fit_rho']
     )
-    analyzer.data_points = data_points
+    mx_anal_len = len(data_points) if max_fit_steps == -1 else max_fit_steps
+    analyzer.data_points = data_points[:mx_anal_len]
 
     # Fit parameters
     print("\nFitting parameters...")
@@ -534,7 +515,7 @@ def load_and_plot(data_path: str, output_path: Optional[str] = None,
 
         # Create plot
         print("\nCreating plot...")
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, (ax, ax1) = plt.subplots(1, 2, figsize=(20, 6))
 
         iterations = np.array([dp['iteration'] for dp in data_points])
 
@@ -555,26 +536,49 @@ def load_and_plot(data_path: str, output_path: Optional[str] = None,
         K_0, K_1, K_rho = fitted_params['K_0'], fitted_params['K_1'], fitted_params['K_rho']
         rho = fitted_params['rho']
         r_squared = fitted_params.get('r_squared', 0)
-        loss_range = np.linspace(losses.min(), losses.max(), 100)
+        losses_anal = np.array([dp['loss_val'] for dp in analyzer.data_points])
+        loss_range = np.linspace(losses_anal.min(), losses_anal.max(), 100)
         fitted_line = K_0 + K_1 * loss_range + K_rho * loss_range**rho
 
         ax.plot(loss_range, fitted_line, 'r-', linewidth=3,
-                label=f'Fitted line: K_0 + K_1·loss + K_ρ·loss^{rho:.2f}\nK_0={K_0:.2f}, K_1={K_1:.2f}, K_ρ={K_rho:.2f}\nρ={rho:.2f} ({fit_status}), R²={r_squared:.3f}')
+                label=f'Fitted line: K_0 + K_1·loss + K_ρ·loss^{rho:.2f}\nR2 score = {r_squared:.3f}')
+                #\nK_0={K_0:.2f}, K_1={K_1:.2f}, K_ρ={K_rho:.2f}\nρ={rho:.2f} ({fit_status}), R²={r_squared:.3f}')
 
-        # Add statistics
-        violation_pct = 100 * violations / len(ratios)
-        ax.text(0.02, 0.98, f'Points above line: {violations}/{len(ratios)} ({violation_pct:.1f}%)',
-               transform=ax.transAxes, verticalalignment='top',
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        # # Add statistics
+        # violation_pct = 100 * violations / len(ratios)
+        # ax.text(0.02, 0.98, f'Points above line: {violations}/{len(ratios)} ({violation_pct:.1f}%)',
+        #        transform=ax.transAxes, verticalalignment='top',
+        #        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
-        threshold = (K_0 / (K_rho * (rho - 1)))**rho if rho > 1 else 0
-        ax.text(0.02, 0.07, f'Estimated threshold: {threshold:.4f}',
-               transform=ax.transAxes, verticalalignment='top',
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        # threshold = (K_0 / (K_rho * (rho - 1)))**rho if rho > 1 else 0
+        # ax.text(0.02, 0.07, f'Estimated threshold: {threshold:.4f}',
+        #        transform=ax.transAxes, verticalalignment='top',
+        #        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
-        ax.legend(fontsize=11, loc='upper right')
+        ax.legend(fontsize=15)
+        
+        
+        ax1.scatter(iterations, losses / ratios, c=iterations, cmap='coolwarm',
+                   alpha=0.7, s=30, edgecolors='black', linewidth=0.2)
+        ax1.set_xlabel('Training Iteration (t)', fontsize=12)
+        ax1.set_ylabel(r'lr($\Delta_t$)', fontsize=12)
+        ax1.set_title('Theoretical Learning rate vs Training Iteration', fontsize=14)
+        ax1.grid(True, alpha=0.3)
+        cbar1 = plt.colorbar(ax1.collections[0], ax=ax1)
+        cbar1.set_label('Training Iteration', fontsize=10)
+        
+        iterations_anal = np.array([dp['iteration'] for dp in analyzer.data_points])
+        losses_anal = np.array([dp['loss_val'] for dp in analyzer.data_points])
+        fitted_line = (losses_anal) / (K_0 + K_1 * losses_anal + K_rho * losses_anal**rho)
+        
+        ax1.plot(iterations_anal, fitted_line, 'r-', linewidth=3,
+                label=f'Fitted line')
+        
+        
+        
+        ax1.legend(fontsize=15)
+
         plt.tight_layout()
-
         # Save plot
         if output_path:
             output_path = Path(output_path)
@@ -583,7 +587,7 @@ def load_and_plot(data_path: str, output_path: Optional[str] = None,
             print(f"Saved plot to {output_path}")
         else:
             # Save to same directory as data file
-            output_path = data_path / f"lipschitz_analysis_plot_min={min_analysis_steps}_max={max_analysis_steps}.png"
+            output_path = data_path / f"lipschitz_analysis_plot_min={min_analysis_steps}_max={max_analysis_steps}_anal_max={max_fit_steps}.png"
             plt.savefig(output_path, dpi=150, bbox_inches='tight')
             print(f"Saved plot to {output_path}")
 
@@ -599,6 +603,7 @@ if __name__ == "__main__":
     args, parser = get_args()
     run_name = get_exp_name(args, parser)
 
-    min_analysis_steps, max_analysis_steps = 0, 30000
+    min_analysis_steps, max_analysis_steps, max_fit_steps = 100, 9000, 5000
 
-    load_and_plot(f"lip_points/{run_name}", None, min_analysis_steps, max_analysis_steps)
+    load_and_plot(f"lip_points/{run_name}", None, 
+                  min_analysis_steps, max_analysis_steps, max_fit_steps)

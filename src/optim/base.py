@@ -147,8 +147,8 @@ def train(
         prev_grads_for_lipschitz = None
         prev_weights_for_lipschitz = None
         if lipschitz_analyzer and lipschitz_analyzer.is_enabled(curr_iter):
-            prev_grads_for_lipschitz = lipschitz_analyzer._get_model_grads_flat(model).clone().detach()
-            prev_weights_for_lipschitz = lipschitz_analyzer._get_model_weights_flat(model).clone().detach()
+            prev_grads_for_lipschitz = lipschitz_analyzer._get_model_grads_flat(model)
+            prev_weights_for_lipschitz = lipschitz_analyzer._get_model_weights_flat(model)
         
         if cfg.grad_clip != 0.0:
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
@@ -163,14 +163,14 @@ def train(
 
         if cfg.opt == "sf-sgd" or cfg.opt == "sf-adamw":
             opt.train()
-        (
+        
+        if cfg.opt != "sophiag":
             opt.step()
-            if cfg.opt != "sophiag"
-            else opt.step(bs=cfg.sophia_bs * cfg.sequence_length)
-        )
+        else:
+            opt.step(bs=cfg.sophia_bs * cfg.sequence_length)
         if cfg.scheduler != "none":
             # Pass loss to scheduler for Lipschitz scheduler
-            if cfg.scheduler == "lipschitz":
+            if cfg.use_lip_warmup:
                 scheduler.step(loss=loss.detach().item())
             else:
                 scheduler.step()
@@ -198,8 +198,11 @@ def train(
 
             # Now gradients are computed at new weights on the same batch
             train_loss = recomputed_loss * cfg.acc_steps
-            current_grads_for_lipschitz = lipschitz_analyzer._get_model_grads_flat(model).clone().detach()
-            current_weights_for_lipschitz = lipschitz_analyzer._get_model_weights_flat(model).clone().detach()
+            current_grads_for_lipschitz = lipschitz_analyzer._get_model_grads_flat(model)
+            current_weights_for_lipschitz = lipschitz_analyzer._get_model_weights_flat(model)
+            
+            # print(prev_weights_for_lipschitz[1])
+            # print(current_weights_for_lipschitz[1])
 
             # Update with both old and new gradients/weights on the SAME batch
             lipschitz_analyzer.update_with_grads(
@@ -269,7 +272,7 @@ def train(
                 }
 
                 # Add Lipschitz scheduler parameters if using lipschitz scheduler
-                if cfg.scheduler == "lipschitz" and scheduler is not None:
+                if cfg.use_lip_warmup and scheduler is not None:
                     if scheduler.current_loss is not None:
                         delta_t = max(scheduler.current_loss - scheduler.loss_star, scheduler.epsilon)
                         log_dict["lipschitz_scheduler/delta_t"] = delta_t

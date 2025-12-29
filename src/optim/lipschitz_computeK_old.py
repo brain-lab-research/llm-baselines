@@ -37,8 +37,10 @@ def cosine_target(x, x_start, x_end, eta_start, eta_end):
         eta_start, eta_end = eta_end, eta_start
 
     if x < x_start:
+        print("!!!!")
         return eta_start, 0.0, 0.0
     if x > x_end:
+        print("????")
         return eta_end, 0.0, 0.0
 
     L = x_end - x_start
@@ -91,23 +93,22 @@ def compute_lipschitz_constants(lr, lr_0, x0, target='linear', mode="func_prime"
         if abs(eta_func(x0, K0, K1, K2) - lr/div) > 1e-10:
             return np.inf
 
+        eta_x_star = eta_func(x_star, K0, K1, K2)
+        eta_x0 = eta_func(x0, K0, K1, K2)
+        if abs(x0 - x_star) < 1e-12:
+            return np.inf
         
-        # if abs(x0 - x_star) < 1e-12:
-        #     return np.inf
-        
-        x_start = 0.0 if mode in ["intergral_0_x0", "func_prime_0x*", "linear_and_cos"] else x_star
+        x_start = 0.0 if mode in ["intergral_0_x0", "func_prime_0x*"] else x_star
         x_end = x_star if mode in ["func_prime_0x*"] else x0
-        eta_x_start = eta_func(x_start, K0, K1, K2)
-        eta_x_end = eta_func(x_end, K0, K1, K2)
 
         # Select target function and derivative
         if target == 'linear':
             def target_func(x):
-                val, deriv, d2 = linear_target(x, x_start, x_end, eta_x_start, eta_x_end)
+                val, deriv, d2 = linear_target(x, x_start, x_end, eta_x_star, eta_x0)
                 return val, deriv, d2
         elif target == 'cos':
             def target_func(x):
-                val, deriv, d2 = cosine_target(x, x_start, x_end, eta_x_start, eta_x_end)
+                val, deriv, d2 = cosine_target(x, x_start, x_end, eta_x_star, eta_x0)
                 return val, deriv, d2
         else:
             raise ValueError(f"Unknown target function '{target}'")
@@ -116,20 +117,11 @@ def compute_lipschitz_constants(lr, lr_0, x0, target='linear', mode="func_prime"
             if mode in ["func_prime", "func_prime_0x*"]:
                 eta_val = eta_func(x, K0, K1, K2)
                 eta_der = eta_prime(x, K0, K1, K2)
-                eta_der_der = eta_double_prime(x, K0, K1, K2)
-                target_val, target_der, target_d2 = target_func(x)
-                return abs(eta_val - target_val) + abs(eta_der - target_der)
-                return abs(eta_val - target_val) + abs(eta_der - target_der) + abs(eta_der_der - target_d2)
+                target_val, target_der, _ = target_func(x)
+                return abs(eta_val - target_val) # + abs(eta_der - target_der)
             elif mode == "double_prime":
                 _, _, d2 = target_func(x)
                 return abs(eta_double_prime(x, K0, K1, K2) - d2)
-            elif mode == "linear_and_cos":
-                eta_val = eta_func(x, K0, K1, K2)
-                if x <= x_star:
-                    target_val, _, _ = cosine_target(x, x_start, x_star, eta_x_start, eta_func(x_star, K0, K1, K2))
-                else:
-                    target_val, _, _ = linear_target(x, x_star, x_end, eta_func(x_star, K0, K1, K2), eta_x_end)
-                return abs(eta_val - target_val)
             elif mode == "intergral_0_x0":
                 return -eta_func(x, K0, K1, K2)
         
@@ -138,11 +130,11 @@ def compute_lipschitz_constants(lr, lr_0, x0, target='linear', mode="func_prime"
         # except:
         #     return np.inf
 
-        return integral / abs(x_end - x_start)
+        return integral / max(abs(x_end - x_start), 1e-12)
 
     def optimize_x_star(x_star):
-        # if x_star >= x0 or x_star <= 0:
-        #     return np.inf, 0, 0, 0
+        if x_star >= x0 or x_star <= 0:
+            return np.inf, 0, 0, 0
         # try:
         K2 = x0*(div - 1)/(lr*(x0 - x_star)**2)
         K0 = K2 * x_star**2
@@ -154,7 +146,7 @@ def compute_lipschitz_constants(lr, lr_0, x0, target='linear', mode="func_prime"
         obj_value = objective(params, x_star, x0, lr, div)
         return obj_value, K0, K1, K2
 
-    x_star_values = np.linspace(0.01, x0 - 0.01, 500)
+    x_star_values = np.linspace(0.1, x0 - 0.1, 50)
     obj_values = []
     K_params = []
 
@@ -192,16 +184,14 @@ def compute_lipschitz_constants(lr, lr_0, x0, target='linear', mode="func_prime"
         Y = [eta_func(x, optimal_K0, optimal_K1, optimal_K2) for x in X]
 
         # Prepare target function values for plotting
-        x_start = 0.0 if mode in ["intergral_0_x0", "func_prime_0x*"] else optimal_x_star
-        x_end = optimal_x_star if mode in ["func_prime_0x*"] else x0
-        eta_x_start = eta_func(x_start, optimal_K0, optimal_K1, optimal_K2)
-        eta_x_end = eta_func(x_end, optimal_K0, optimal_K1, optimal_K2)
+        eta_x_star = eta_func(optimal_x_star, optimal_K0, optimal_K1, optimal_K2)
+        eta_x0 = eta_func(x0, optimal_K0, optimal_K1, optimal_K2)
         if target == 'linear':
-            target_vals = [linear_target(x, x_start, x_end, eta_x_start, eta_x_end)[0] for x in X if x_start <= x <= x_end]
-            target_x = [x for x in X if x_start <= x <= x_end]
+            target_vals = [linear_target(x, optimal_x_star, x0, eta_x_star, eta_x0)[0] for x in X if optimal_x_star <= x <= x0]
+            target_x = [x for x in X if optimal_x_star <= x <= x0]
         elif target == 'cos':
-            target_vals = [cosine_target(x, x_start, x_end, eta_x_start, eta_x_end)[0] for x in X if x_start <= x <= x_end]
-            target_x = [x for x in X if x_start <= x <= x_end]
+            target_vals = [cosine_target(x, optimal_x_star, x0, eta_x_star, eta_x0)[0] for x in X if optimal_x_star <= x <= x0]
+            target_x = [x for x in X if optimal_x_star <= x <= x0]
         else:
             raise ValueError(f"Unknown target function '{target}'")
 
@@ -233,9 +223,9 @@ if __name__ == "__main__":
     loss_0 = 11
     loss_star = 3.45
     target = 'cos'  # 'linear' or 'cos'
-    mode = "linear_and_cos"  # "func_prime", "double_prime", or "intergral_0_x0"
+    mode = "func_prime_0x*"  # "func_prime", "double_prime", or "intergral_0_x0"
 
-    _ = compute_lipschitz_constants(
+    compute_lipschitz_constants(
         lr, lr / div, loss_0 - loss_star, 
         target=target, mode=mode, verbose=True
     )

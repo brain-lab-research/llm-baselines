@@ -23,6 +23,7 @@ def get_scheduler(optimizer, args, n_iterations=None, group_specs=None):
     # If n_iterations is custom (different from args.iterations), we're re-initializing after warmup
     is_reinit = (n_iterations != args.iterations)
     use_div_factor_1 = is_reinit or args.use_lip_warmup
+    warmup_steps = 0 if is_reinit else args.warmup_steps
 
     # Import CombinedScheduler if needed
     if args.opt == "muon":
@@ -32,11 +33,12 @@ def get_scheduler(optimizer, args, n_iterations=None, group_specs=None):
         if args.opt != "muon":
             return torch.optim.lr_scheduler.OneCycleLR(
                 optimizer=optimizer,
-                max_lr=[
-                    group.get("lr", args.lr) for group in (group_specs or [])
-                ] if group_specs else args.lr,
+                # max_lr=[
+                #     group.get("lr", args.lr) for group in (group_specs or [])
+                # ] if group_specs else args.lr,
+                max_lr=args.lr,
                 total_steps=n_iterations,
-                pct_start=args.warmup_steps / args.iterations,
+                pct_start=warmup_steps / n_iterations,
                 anneal_strategy=args.scheduler,
                 cycle_momentum=False,
                 div_factor=1 if use_div_factor_1 else args.div_factor,
@@ -46,6 +48,8 @@ def get_scheduler(optimizer, args, n_iterations=None, group_specs=None):
             import copy
             new_args = copy.copy(args)
             new_args.iterations = n_iterations
+            new_args.warmup_steps = warmup_steps
+            new_args.div_factor = 1 if use_div_factor_1 else args.div_factor
             return CombinedScheduler(optimizer, new_args)
 
     elif args.scheduler == "cos_inf":

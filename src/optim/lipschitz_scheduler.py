@@ -95,18 +95,17 @@ class LipschitzScheduler(_LRScheduler):
         if self.current_loss is None:
             print("No loss provided for Lipschitz Scheduler!")
             return self.base_lrs
+        
+        self.current_step += 1
 
         if self.use_decay_scheduler and self.decay_scheduler is not None:
             return self.decay_scheduler.get_last_lr()
 
         delta_t = max(self.current_loss - self.loss_star, self.epsilon)
-
         if delta_t <= self.delta_star and self.decay_scheduler is not None:
+            # Re-initialize decay_scheduler with correct total_steps
             if not self.use_decay_scheduler:
-                # Re-initialize decay_scheduler with correct total_steps
                 self._reinit_decay_scheduler()
-            self.use_decay_scheduler = True
-
             return self.decay_scheduler.get_last_lr()
 
         denominator = self.K_0 + self.K_1 * delta_t + self.K_rho * (delta_t ** self.rho)
@@ -129,7 +128,7 @@ class LipschitzScheduler(_LRScheduler):
         if self.decay_scheduler is None:
             return
 
-        remaining_steps = self.max_steps - self.current_step
+        remaining_steps = self.max_steps - self.current_step + 1
         print(f"Re-initializing decay_scheduler with remaining_steps={remaining_steps}")
 
         if self.decay_scheduler_args is not None:
@@ -142,6 +141,7 @@ class LipschitzScheduler(_LRScheduler):
                     group_specs=self.decay_scheduler_group_specs
                 )
                 print(f"Successfully re-initialized decay_scheduler using get_scheduler")
+                self.use_decay_scheduler = True
             except Exception as e:
                 print(f"Warning: Failed to re-initialize decay_scheduler: {e}")
                 import traceback
@@ -170,12 +170,11 @@ class LipschitzScheduler(_LRScheduler):
 
         if loss is not None:
             self.current_loss = float(loss)
-
-        self.current_step += 1
         super().step(epoch)
 
         if self.use_decay_scheduler and self.decay_scheduler is not None:
             self.decay_scheduler.step()
+        
 
     def state_dict(self):
         state = {

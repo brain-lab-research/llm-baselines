@@ -61,7 +61,7 @@ def parse_args(base_parser, args, namespace):
     )
     parser.add_argument("--cos_inf_steps", default=0, type=int)
     parser.add_argument("--div_factor", default=1e2, type=float)
-    parser.add_argument("--final_div_factor", default=1, type=float)
+    parser.add_argument("--final_div_factor", default=10000, type=float)
     # parser.add_argument("--cos-final-lr", default=1e-6, type=float)
     parser.add_argument("--iterations", default=15000, type=int)
     parser.add_argument("--warmup_steps", default=3000, type=int)
@@ -101,6 +101,7 @@ def parse_args(base_parser, args, namespace):
             "adamw",
             "sgd",
             "muon",
+            "d-muon",
             "soap",
             "ademamix",
             "ademamix2",
@@ -180,7 +181,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--lamb_use_bias_correction", default=False, type=bool)
 
     # Dataset params
-    parser.add_argument("--datasets_dir", type=str, default="./src/data/datasets/")
+    parser.add_argument("--datasets_dir", type=str, default="./../../../datasets/")
     parser.add_argument(
         "--dataset",
         default="slimpajama",
@@ -260,7 +261,7 @@ def parse_args(base_parser, args, namespace):
         "--min_analysis_steps", default=None, type=int, help="Minimum number of steps for Lipschitz plot"
     )
     parser.add_argument(
-        "--weight_norm_type", default="frobenius", type=str, choices=["frobenius"]
+        "--weight_norm_type", default=None, type=str
     )
     parser.add_argument(
         "--rho", default=2, type=float, help="rho parameter for Lipschitz analysis"
