@@ -90,6 +90,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--lipschitz_not_adjust_K", action="store_true")
     parser.add_argument("--lipschitz_target", default="linear", choices=["linear", "cosine"])
     parser.add_argument("--lipschitz_mode", default="func_prime")
+    parser.add_argument("--lipschitz_sigma_F", default=0.001, type=float)
     parser.add_argument("--use_lip_warmup", action="store_true")
 
     # Optimization
@@ -181,6 +182,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--lamb_use_bias_correction", default=False, type=bool)
 
     # Dataset params
+    # datasets_dir = ./src/data/datasets/ for brain_lab server and ./../../../datasets/ for VV H200
     parser.add_argument("--datasets_dir", type=str, default="./../../../datasets/")
     parser.add_argument(
         "--dataset",

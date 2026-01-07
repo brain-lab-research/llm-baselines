@@ -419,13 +419,14 @@ def main(args, parser):
                 min_lr=args.lr / args.div_factor,
                 max_lr=args.lr,
                 adjust_K=not args.lipschitz_not_adjust_K,
-                lr=args.lr,
                 max_steps=args.iterations,
                 mode=args.lipschitz_mode,
                 decay_scheduler=scheduler,
                 decay_scheduler_args=args,
                 decay_scheduler_group_specs=group_specs,
                 target=args.lipschitz_target,
+                opt=args.opt,
+                sigma_F=args.lipschitz_sigma_F,
             )
     else:
         scheduler = None

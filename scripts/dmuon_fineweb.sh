@@ -22,8 +22,8 @@ python ./src/optim/lipschitz_analyzer.py \
     --warmup_steps 1000 \
     --grad_clip 0.5 \
     --seed 0 \
-    --weight_decay 0.1 \
-    --scheduler cos \
+    --weight_decay 0 \
+    --scheduler none \
     --momentum 0.9 \
     --dropout 0 \
     --beta1 0.8 --beta2 0.999 \

@@ -603,7 +603,7 @@ if __name__ == "__main__":
     args, parser = get_args()
     run_name = get_exp_name(args, parser)
 
-    min_analysis_steps, max_analysis_steps, max_fit_steps = 100, 9000, 5000
+    min_analysis_steps, max_analysis_steps, max_fit_steps = 150, 19000, 500
 
     load_and_plot(f"lip_points/{run_name}", None, 
                   min_analysis_steps, max_analysis_steps, max_fit_steps)

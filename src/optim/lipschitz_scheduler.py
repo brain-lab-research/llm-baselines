@@ -58,9 +58,10 @@ class LipschitzScheduler(_LRScheduler):
         last_epoch=-1,
         adjust_K=False,
         target="linear",
-        lr=None,
         max_steps=-1,
         mode="func_prime",
+        opt="d-muon",
+        sigma_F=0.001,
         decay_scheduler=None,
         decay_scheduler_args=None,
         decay_scheduler_group_specs=None,
@@ -76,6 +77,8 @@ class LipschitzScheduler(_LRScheduler):
         self.max_lr = max_lr
         self.epsilon = epsilon
         self.adjust_K = adjust_K
+        self.opt = opt
+        self.sigma_F = sigma_F
 
         self.current_loss = None
 
@@ -151,13 +154,42 @@ class LipschitzScheduler(_LRScheduler):
 
     def step(self, loss=None, epoch=None):
         if self.adjust_K and self.current_loss is None and loss is not None:
-            from .lipschitz_computeK import compute_lipschitz_constants
+            from .lipschitz_computeK import (
+                llama124m_shapes,
+                kappa_muon, kappa_sign, kappa_norm,
+                make_w_delta, compute_lipschitz_constants,
+            )
+            # shapes = llama124m_shapes(
+            #     n_layers=12, d_model=768, d_ff=2048, vocab=32000, tied_lm_head=True
+            # )
+            shapes = []
+            for group in self.optimizer.param_groups:
+                for p in group['params']:
+                    if p.requires_grad and p.dim() == 2:
+                        shapes.append(p.data.shape)
+            if "muon" in self.opt:
+                kappa = kappa_muon(shapes)
+                print(f"[MUON] kappa: {kappa}")
+            elif "sign" in self.opt or "lion" in self.opt:
+                kappa = kappa_sign(shapes)
+                print(f"[SIGN/LION] kappa: {kappa}")
+            elif "norm" in self.opt:
+                kappa = kappa_norm(shapes)
+                print(f"[NORM] kappa: {kappa}")
+            else:
+                raise ValueError(f"Unknown optimizer type: {self.opt}")
+            sigma_norm = 1 / kappa#**0.5
+
+            w_delta = make_w_delta(sigma_norm, self.sigma_F)
             self.K_0, self.K_1, self.K_rho, self.delta_star = compute_lipschitz_constants(
                 lr=self.max_lr,
                 lr_0=self.min_lr,
-                x0=loss - self.loss_star,
+                delta0=loss - self.loss_star,
+                loss_star=self.loss_star,
+                loss0=loss,
                 target=self.target,
                 mode=self.mode,
+                w_delta=w_delta,
             )
             if wandb.run:
                 print("Logging Lipschitz constants to wandb")
