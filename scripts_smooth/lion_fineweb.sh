@@ -9,7 +9,7 @@ export CUDA_VISIBLE_DEVICES=4
 python ./src/optim/lipschitz_analyzer.py \
     --model llama \
     --dataset fineweb \
-    --optimizer signum \
+    --optimizer lion \
     --lr 1e-4 \
     --div_factor 100 \
     --iterations 10000 \

@@ -1,24 +1,23 @@
 #!/bin/bash
 # torchrun --nproc_per_node=2 --master_port=1234
 # --distributed_backend nccl \
-export CUDA_VISIBLE_DEVICES=2,3
+export CUDA_VISIBLE_DEVICES=7
 
-for ws in 200 300 1000 1500
+for ws in 200 300 400 500
 do
     for lr in 1e-2
     do
-        torchrun --nproc_per_node=2 --master_port=1255 ./src/main.py \
-            --distributed_backend nccl \
+        python ./src/main.py \
             --model llama \
             --dataset fineweb \
             --optimizer normalized-sgd \
             --lr $lr \
-            --div_factor 5.0 \
-            --iterations 16000 \
+            --div_factor 2.0 \
+            --iterations 128000 \
             --n_embd 768 \
             --n_head 12 \
             --n_layer 12 \
-            --batch_size 256 \
+            --batch_size 32 \
             --sequence_length 512 \
             --acc_steps 1 \
             --grad_clip 0.5 \

@@ -1,10 +1,9 @@
 #!/bin/bash
 # torchrun --nproc_per_node=2 --master_port=1234
 # --distributed_backend nccl \
-export CUDA_VISIBLE_DEVICES=6,7
+export CUDA_VISIBLE_DEVICES=7
 
-torchrun --nproc_per_node=2 --master_port=1221 ./src/main.py \
-    --distributed_backend nccl \
+python ./src/main.py \
     --model llama \
     --dataset fineweb \
     --optimizer lion \

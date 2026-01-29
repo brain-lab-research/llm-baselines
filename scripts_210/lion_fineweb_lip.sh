@@ -1,23 +1,25 @@
 #!/bin/bash
 # torchrun --nproc_per_node=2 --master_port=1234
 # --distributed_backend nccl \
-export CUDA_VISIBLE_DEVICES=2,3
+export CUDA_VISIBLE_DEVICES=1,3
 
-for ws in 200 300 1000 1500
+for iter in 8000 16000
 do
-    for lr in 1e-2
+    for f_star in 3.2 3.5
     do
-        torchrun --nproc_per_node=2 --master_port=1255 ./src/main.py \
+        sleep 5
+        torchrun --nproc_per_node=2 --master_port=1234 ./src/main.py \
             --distributed_backend nccl \
             --model llama \
             --dataset fineweb \
-            --optimizer normalized-sgd \
-            --lr $lr \
-            --div_factor 5.0 \
-            --iterations 16000 \
+            --optimizer lion \
+            --lr 1e-3 \
+            --div_factor 100.0 \
+            --lipschitz_sigma_F 0.001 \
+            --iterations $iter \
             --n_embd 768 \
             --n_head 12 \
-            --n_layer 12 \
+            --n_layer 24 \
             --batch_size 256 \
             --sequence_length 512 \
             --acc_steps 1 \
@@ -25,7 +27,10 @@ do
             --seed 0 \
             --weight_decay 0.1 \
             --scheduler cos \
-            --warmup_steps $ws \
+            --use_lip_warmup \
+            --lipschitz_rho 2.0 \
+            --lipschitz_mode linear_and_cos \
+            --lipschitz_loss_star $f_star \
             --momentum 0.95 \
             --dropout 0 \
             --beta1 0.9 --beta2 0.99 \

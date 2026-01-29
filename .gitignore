@@ -12,6 +12,8 @@ __pycache__/
 *.so
 
 lip_points/
+logs/
+logs_*/
 
 # Distribution / packaging
 .Python

@@ -1,11 +1,11 @@
 #!/bin/bash
 # torchrun --nproc_per_node=2 --master_port=1234
 # --distributed_backend nccl \ 1000 2000 3000 4000 
-export CUDA_VISIBLE_DEVICES=4,7
+export CUDA_VISIBLE_DEVICES=5,7
 
-for iter in 8000 16000
+for iter in 16000
 do
-    for ws in 4500 5000 5500 6000 6500 7000
+    for ws in 500 1500 2500 3000
     do
         sleep 5
         torchrun --nproc_per_node=2 --master_port=1234 ./src/main.py \

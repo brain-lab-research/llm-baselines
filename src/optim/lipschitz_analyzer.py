@@ -515,21 +515,37 @@ def load_and_plot(data_path: str, output_path: Optional[str] = None,
 
         # Create plot
         print("\nCreating plot...")
-        fig, (ax, ax1) = plt.subplots(1, 2, figsize=(20, 6))
+        plt.rcParams['figure.figsize'] = (12, 8)
+        plt.rcParams['font.size'] = 20
+        plt.rcParams['axes.labelsize'] = 20
+        plt.rcParams['axes.titlesize'] = 18
+        plt.rcParams['legend.fontsize'] = 20
+        plt.rcParams['lines.linewidth'] = 4.5
+        plt.rcParams['lines.markersize'] = 12
+        plt.rcParams['xtick.labelsize'] = 20
+        plt.rcParams['ytick.labelsize'] = 20
+
+        FIGSIZE = (12, 8)
+        LINEWIDTH = 4.5
+        MARKERSIZE = 50
+        LINEWIDTH_DASHED = 3
+        ALPHA = 0.8
+        # fig, (ax, ax1) = plt.subplots(1, 2, figsize=(20, 6))
+        fig, ax = plt.subplots(1, 1, figsize=FIGSIZE)
 
         iterations = np.array([dp['iteration'] for dp in data_points])
 
         # Main scatter plot with color mapping by iteration
         scatter = ax.scatter(losses, ratios, c=iterations, cmap='coolwarm',
-                           alpha=0.7, s=30, edgecolors='black', linewidth=0.5)
+                           alpha=ALPHA, s=MARKERSIZE, edgecolors='black', linewidth=0.5)
 
         # Add colorbar
         cbar = plt.colorbar(scatter, ax=ax)
-        cbar.set_label('Training Iteration', fontsize=10)
+        cbar.set_label(r'Training Iteration $t$', fontsize=25)
 
-        ax.set_xlabel(f'loss(x) - loss(x*) = loss(x) - {config["f_star"]}', fontsize=12)
-        ax.set_ylabel('||∇loss(x) - ∇loss(y)||_* / ||x - y||', fontsize=12)
-        ax.set_title('Lipschitz Analysis: Data vs Fitted Line', fontsize=14)
+        ax.set_xlabel(fr'$\Delta^t = \mathrm{{loss}}(x^t) - \mathrm{{loss}}^\star$', fontsize=25, fontweight='bold')
+        ax.set_ylabel(fr'$||\nabla \mathrm{{loss}}(x^{{t+1}}) - \nabla \mathrm{{loss}}(x^t)||_* / ||x^{{t+1}} - x^t||$', fontsize=21, fontweight='bold')
+        # ax.set_title('Lipschitz Analysis: Optimization Trajectory vs Fitted Line', fontsize=20, fontweight='bold')
         ax.grid(True, alpha=0.3)
 
         # Plot fitted line
@@ -540,8 +556,8 @@ def load_and_plot(data_path: str, output_path: Optional[str] = None,
         loss_range = np.linspace(losses_anal.min(), losses_anal.max(), 100)
         fitted_line = K_0 + K_1 * loss_range + K_rho * loss_range**rho
 
-        ax.plot(loss_range, fitted_line, 'r-', linewidth=3,
-                label=f'Fitted line: K_0 + K_1·loss + K_ρ·loss^{rho:.2f}\nR2 score = {r_squared:.3f}')
+        ax.plot(loss_range, fitted_line, 'r-', linewidth=LINEWIDTH,
+                label=rf'Fitted line: $K_0 + K_1 \cdot \Delta + K_2 \cdot \Delta^{rho:.0f}$'+f'\nR2 score = {r_squared:.3f}')
                 #\nK_0={K_0:.2f}, K_1={K_1:.2f}, K_ρ={K_rho:.2f}\nρ={rho:.2f} ({fit_status}), R²={r_squared:.3f}')
 
         # # Add statistics
@@ -555,28 +571,28 @@ def load_and_plot(data_path: str, output_path: Optional[str] = None,
         #        transform=ax.transAxes, verticalalignment='top',
         #        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
-        ax.legend(fontsize=15)
+        ax.legend()
         
         
-        ax1.scatter(iterations, losses / ratios, c=iterations, cmap='coolwarm',
-                   alpha=0.7, s=30, edgecolors='black', linewidth=0.2)
-        ax1.set_xlabel('Training Iteration (t)', fontsize=12)
-        ax1.set_ylabel(r'lr($\Delta_t$)', fontsize=12)
-        ax1.set_title('Theoretical Learning rate vs Training Iteration', fontsize=14)
-        ax1.grid(True, alpha=0.3)
-        cbar1 = plt.colorbar(ax1.collections[0], ax=ax1)
-        cbar1.set_label('Training Iteration', fontsize=10)
+        # ax1.scatter(iterations, losses / ratios, c=iterations, cmap='coolwarm',
+        #            alpha=0.7, s=30, edgecolors='black', linewidth=0.2)
+        # ax1.set_xlabel('Training Iteration (t)', fontsize=12)
+        # ax1.set_ylabel(r'lr($\Delta_t$)', fontsize=12)
+        # ax1.set_title('Theoretical Learning rate vs Training Iteration', fontsize=14)
+        # ax1.grid(True, alpha=0.3)
+        # cbar1 = plt.colorbar(ax1.collections[0], ax=ax1)
+        # cbar1.set_label('Training Iteration', fontsize=10)
         
         iterations_anal = np.array([dp['iteration'] for dp in analyzer.data_points])
         losses_anal = np.array([dp['loss_val'] for dp in analyzer.data_points])
         fitted_line = (losses_anal) / (K_0 + K_1 * losses_anal + K_rho * losses_anal**rho)
         
-        ax1.plot(iterations_anal, fitted_line, 'r-', linewidth=3,
-                label=f'Fitted line')
+        # ax1.plot(iterations_anal, fitted_line, 'r-', linewidth=3,
+        #         label=f'Fitted line')
         
         
         
-        ax1.legend(fontsize=15)
+        # ax1.legend(fontsize=15)
 
         plt.tight_layout()
         # Save plot
@@ -603,7 +619,14 @@ if __name__ == "__main__":
     args, parser = get_args()
     run_name = get_exp_name(args, parser)
 
-    min_analysis_steps, max_analysis_steps, max_fit_steps = 150, 19000, 500
+    min_analysis_steps, max_analysis_steps, max_fit_steps = 1000, 9500, 5000
+    
+    # MUON: min_analysis_steps, max_analysis_steps, max_fit_steps = 250, 15000, 650
+    # LION: min_analysis_steps, max_analysis_steps, max_fit_steps = 150, 9000, 5000
+    # NORM: min_analysis_steps, max_analysis_steps, max_fit_steps = 1000, 9500, 5000
 
-    load_and_plot(f"lip_points/{run_name}", None, 
-                  min_analysis_steps, max_analysis_steps, max_fit_steps)
+
+    opt_name = args.opt.lower()
+    load_and_plot(f"lip_points/{run_name}", f"lip_points_paper/{opt_name}.pdf",
+                  min_analysis_steps, max_analysis_steps, max_fit_steps,
+                  )
